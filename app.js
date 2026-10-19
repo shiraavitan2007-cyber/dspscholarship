@@ -4,18 +4,23 @@ const CONFIG = window.DSP_CONFIG || {};
 
 // Must match allowed_tags() in supabase/schema.sql
 const TAGS = [
-  "Clear lectures", "Engaging", "Caring", "Accessible outside class",
-  "Tough grader", "Lots of homework", "Heavy reading", "Test heavy",
-  "Group projects", "Attendance required", "Participation matters",
-  "Curves exams", "Extra credit", "Lecture heavy",
+  "Tough Grader", "Get Ready to Read", "Participation Matters", "Extra Credit",
+  "Group Projects", "Amazing Lectures", "Clear Grading Criteria", "Gives Good Feedback",
+  "Inspirational", "Lots of Homework", "Hilarious", "Beware of Pop Quizzes",
+  "So Many Papers", "Caring", "Respected", "Lecture Heavy",
+  "Test Heavy", "Graded By Few Things", "Accessible Outside Class", "Online Savvy",
 ];
-const MAX_TAGS = 5;
-const GRADES = ["A", "B", "C", "D", "F", "Pass", "Withdrew"];
-const TERMS = ["Spring", "Summer", "Fall", "Winter"];
+// Must match reviews_grade_check in supabase/schema.sql. [stored value, label]
+const GRADES = [
+  ["A+", "A+"], ["A", "A"], ["A-", "A-"], ["B+", "B+"], ["B", "B"], ["B-", "B-"],
+  ["C+", "C+"], ["C", "C"], ["C-", "C-"], ["D+", "D+"], ["D", "D"], ["D-", "D-"], ["F", "F"],
+  ["S", "S (satisfactory)"], ["NS", "NS (not satisfactory)"], ["Dropped", "Dropped the class"],
+];
+const TERMS = ["Fall", "Winter", "Spring", "Summer"];
 const OVERALL_LABELS = ["", "Awful", "Poor", "OK", "Good", "Awesome"];
 const DIFFICULTY_LABELS = ["", "Very easy", "Easy", "Average", "Hard", "Very hard"];
-const REVIEW_COLUMNS =
-  "id, professor_id, course_code, semester, overall, difficulty, take_again, grade, tags, body, created_at, updated_at";
+const REVIEW_COLUMNS = "id, professor_id, course_code, semester, overall, difficulty, take_again, "
+  + "attendance_mandatory, grade, tags, other_tag, body, created_at, updated_at";
 
 // localStorage keys: which reviews this browser posted (needed to edit/delete them)
 const TOKENS = "dsp-review-tokens"; // reviewId -> secret edit token
@@ -130,7 +135,7 @@ async function render() {
 function header() {
   return h("header", { class: "topbar" },
     h("div", { class: "wrap topbar-inner" },
-      h("a", { href: "#/", class: "brand" }, "DSP ", h("span", {}, "Professor Reviews")),
+      h("a", { href: "#/", class: "brand" }, "RateMyBrofessor"),
       h("nav", {},
         isAdmin() && h("a", { href: "#/admin" }, "Admin"),
         h("button", { class: "link", type: "button", onclick: () => supabase.auth.signOut({ scope: "local" }) }, "Sign out"),
@@ -152,8 +157,8 @@ function renderLogin() {
   const btn = h("button", { class: "btn", type: "submit" }, "Sign in");
 
   const form = h("form", { class: "card login" },
-    h("h1", {}, "DSP Professor Reviews"),
-    h("p", { class: "muted" }, "For Delta Sigma Pi brothers only. Enter the chapter password."),
+    h("h1", {}, "RateMyBrofessor"),
+    h("p", { class: "muted" }, "Delta Sigma Pi professor reviews, for brothers only. Enter the chapter password."),
     field("Password", "password", input),
     msg,
     btn);
@@ -275,12 +280,17 @@ async function renderProfessor(view, id) {
     h("div", { class: "stat-row" },
       stat("Difficulty", fmt(prof.avg_difficulty)),
       stat("Would take again", prof.review_count ? `${prof.pct_take_again}%` : "–"),
+      stat("Say attendance is mandatory", prof.pct_attendance_mandatory == null ? "–" : `${prof.pct_attendance_mandatory}%`),
       stat("Reviews", prof.review_count)),
     topTags.length > 0 && h("div", { class: "tags" }, topTags.map(([t, n]) => h("span", { class: "tag" }, `${t} · ${n}`))),
     h("a", { href: `#/review/new?prof=${id}`, class: "btn btn-block" }, "Rate this professor"),
     courses.length > 2 && filters,
     list);
   update();
+}
+
+function gradeLabel(value) {
+  return GRADES.find(([v]) => v === value)?.[1] || value;
 }
 
 function stat(label, value) {
@@ -317,9 +327,13 @@ function reviewCard(r) {
       h("span", { class: "muted small" }, formatDate(r.created_at), edited && " (edited)")),
     h("p", { class: "review-meta" },
       h("strong", {}, r.course_code), ` · ${r.semester}`,
-      r.grade && ` · Grade: ${r.grade}`,
-      ` · ${r.take_again ? "Would take again" : "Would not take again"}`),
-    r.tags.length > 0 && h("div", { class: "tags" }, r.tags.map((t) => h("span", { class: "tag" }, t))),
+      r.grade && ` · Grade: ${gradeLabel(r.grade)}`),
+    h("p", { class: "review-facts" },
+      r.take_again ? "Would take again" : "Would not take again",
+      r.attendance_mandatory != null && ` · Attendance ${r.attendance_mandatory ? "mandatory" : "not mandatory"}`),
+    (r.tags.length > 0 || r.other_tag) && h("div", { class: "tags" },
+      r.tags.map((t) => h("span", { class: "tag" }, t)),
+      r.other_tag && h("span", { class: "tag" }, r.other_tag)),
     h("p", { class: "review-body" }, r.body),
     actions);
 }
@@ -368,7 +382,8 @@ async function renderForm(view, { professorId = null, reviewId = null }) {
   const now = new Date();
   const [existingTerm, existingYear] = existing ? existing.semester.split(" ") : [];
   const month = now.getMonth();
-  const term = h("select", { id: "term", "aria-label": "Term", value: existingTerm || (month < 5 ? "Spring" : month < 7 ? "Summer" : "Fall") },
+  const currentTerm = month < 3 ? "Winter" : month < 6 ? "Spring" : month < 8 ? "Summer" : "Fall";
+  const term = h("select", { id: "term", "aria-label": "Quarter", value: existingTerm || currentTerm },
     TERMS.map((t) => h("option", { value: t }, t)));
   const years = Array.from({ length: 7 }, (_, i) => String(now.getFullYear() - i));
   if (existingYear && !years.includes(existingYear)) years.push(existingYear);
@@ -376,53 +391,42 @@ async function renderForm(view, { professorId = null, reviewId = null }) {
 
   const grade = h("select", { id: "grade", value: existing?.grade || "" },
     h("option", { value: "" }, "Prefer not to say"),
-    GRADES.map((g) => h("option", { value: g }, g)));
+    GRADES.map(([value, label]) => h("option", { value }, label)));
 
   const tagBoxes = TAGS.map((t) => h("input", { type: "checkbox", name: "tags", value: t, checked: existing?.tags.includes(t) }));
-  const tagHint = h("p", { class: "hint" }, `Pick up to ${MAX_TAGS}.`);
-  function limitTags() {
-    const count = tagBoxes.filter((b) => b.checked).length;
-    for (const b of tagBoxes) b.disabled = !b.checked && count >= MAX_TAGS;
-  }
-  tagBoxes.forEach((b) => b.addEventListener("change", limitTags));
-  limitTags();
+  const otherTag = h("input", { id: "other-tag", maxlength: 40, placeholder: "Something else? (optional)", value: existing?.other_tag });
 
-  const body = h("textarea", { id: "body", required: true, minlength: 50, maxlength: 1000, rows: 6,
-    placeholder: "How was the teaching? Exams, workload, grading, tips for future students…", value: existing?.body });
+  const body = h("textarea", { id: "body", required: true, minlength: 10, maxlength: 3000, rows: 7, value: existing?.body });
   const counter = h("p", { class: "hint" });
-  const updateCounter = () => { counter.textContent = `${body.value.trim().length}/1000 characters (minimum 50)`; };
+  const updateCounter = () => { counter.textContent = `${body.value.trim().length}/3000 characters`; };
   body.addEventListener("input", updateCounter);
   updateCounter();
 
   const status = h("p", { class: "error", hidden: true });
-  const submit = h("button", { class: "btn btn-block", type: "submit" }, existing ? "Save changes" : "Post review");
+  const submit = h("button", { class: "btn btn-block", type: "submit" }, existing ? "Save changes" : "Submit review");
 
   const form = h("form", { class: "review-form" },
     h("a", { href: existing ? `#/prof/${professorId}` : "#/", class: "back" }, "← Back"),
-    h("h1", { class: "page-title" }, existing ? "Edit your review" : "Write a review"),
+    h("h1", { class: "page-title" }, existing ? "Edit your review" : "RateMyBrofessor"),
     h("div", { class: "guidelines" },
-      h("strong", {}, "Reviews are anonymous. Keep them useful:"),
-      h("ul", {},
-        h("li", {}, "Be honest and specific: workload, exams, grading, teaching style."),
-        h("li", {}, "Focus on the course and the teaching, not the person."),
-        h("li", {}, "No personal attacks, insults, or private information."))),
+      h("p", {}, "Share your reviews of your professors: the good, the bad, and the ugly. ",
+        h("strong", {}, "All reviews and responses are anonymous.")),
+      h("p", { class: "small muted" }, "Keep it about the class and the teaching. No personal attacks or private information.")),
+    field("Class", "course", courseInput),
     field("Professor", "prof", profSelect),
     newProfBox,
-    field("Course", "course", courseInput),
-    h("div", { class: "field" }, h("label", { for: "term" }, "Semester taken"), h("div", { class: "row" }, term, year)),
-    h("fieldset", { class: "field" }, h("legend", {}, "Overall quality"), scale("overall", OVERALL_LABELS, existing?.overall)),
+    h("div", { class: "field" }, h("label", { for: "term" }, "Quarter taken"), h("div", { class: "row" }, term, year)),
+    h("fieldset", { class: "field" }, h("legend", {}, "Quality"), scale("overall", OVERALL_LABELS, existing?.overall)),
     h("fieldset", { class: "field" }, h("legend", {}, "Difficulty"), scale("difficulty", DIFFICULTY_LABELS, existing?.difficulty)),
-    h("fieldset", { class: "field" }, h("legend", {}, "Would you take this professor again?"),
-      h("div", { class: "segmented two" },
-        ["yes", "no"].map((v) => h("label", {},
-          h("input", { type: "radio", name: "take_again", value: v, required: true, checked: existing && existing.take_again === (v === "yes") }),
-          h("span", {}, v === "yes" ? "Yes" : "No"))))),
-    field("Grade received (optional)", "grade", grade),
-    h("fieldset", { class: "field" }, h("legend", {}, "Tags (optional)"),
-      h("div", { class: "tag-picker" }, tagBoxes.map((b) => h("label", { class: "tag-option" }, b, h("span", {}, b.value)))),
-      tagHint),
-    field("Your review", "body", body, null),
+    h("fieldset", { class: "field" }, h("legend", {}, "Would you take it again?"), yesNo("take_again", existing?.take_again)),
+    h("fieldset", { class: "field" }, h("legend", {}, "Attendance mandatory?"), yesNo("attendance", existing?.attendance_mandatory)),
+    field("Grade received (optional)", "grade", grade, "Choose \"Dropped\" or S/NS if that applies."),
+    field("Share your unfiltered thoughts here!", "body", body,
+      "Please share as much as you are willing to. This is by far the most helpful part of the review."),
     counter,
+    h("fieldset", { class: "field" }, h("legend", {}, "Select all/any that apply (optional)"),
+      h("div", { class: "tag-picker" }, tagBoxes.map((b) => h("label", { class: "tag-option" }, b, h("span", {}, b.value)))),
+      h("div", { class: "other-tag" }, otherTag)),
     status,
     submit);
 
@@ -432,7 +436,7 @@ async function renderForm(view, { professorId = null, reviewId = null }) {
 
     const course = normalizeCourse(courseInput.value);
     const text = body.value.trim();
-    if (text.length < 50) return showStatus("Your review needs at least 50 characters.");
+    if (text.length < 10) return showStatus("Please write a little more in your review.");
 
     let profId = existing ? existing.professor_id : profSelect.value;
     const reviewed = load(REVIEWED);
@@ -448,8 +452,10 @@ async function renderForm(view, { professorId = null, reviewId = null }) {
       p_overall: Number(form.elements.overall.value),
       p_difficulty: Number(form.elements.difficulty.value),
       p_take_again: form.elements.take_again.value === "yes",
+      p_attendance_mandatory: form.elements.attendance.value === "yes",
       p_grade: grade.value || null,
       p_tags: tagBoxes.filter((b) => b.checked).map((b) => b.value),
+      p_other_tag: otherTag.value.trim() || null,
       p_body: text,
     };
 
@@ -481,6 +487,13 @@ async function renderForm(view, { professorId = null, reviewId = null }) {
   }
 
   view.replaceChildren(form);
+}
+
+function yesNo(name, current) {
+  return h("div", { class: "segmented two" },
+    ["yes", "no"].map((v) => h("label", {},
+      h("input", { type: "radio", name, value: v, required: true, checked: current != null && current === (v === "yes") }),
+      h("span", {}, v === "yes" ? "Yes" : "No"))));
 }
 
 function scale(name, labels, current) {

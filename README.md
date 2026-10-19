@@ -1,4 +1,4 @@
-# DSP Professor Reviews
+# RateMyBrofessor (DSP Professor Reviews)
 
 Internal professor reviews for our Delta Sigma Pi chapter, live at https://dspscholarship.com.
 Hosted on GitHub Pages; reviews are stored in Supabase (project `dsp-professor-reviews`:

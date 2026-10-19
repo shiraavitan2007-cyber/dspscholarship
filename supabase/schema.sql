@@ -1,5 +1,5 @@
 -- =============================================================
--- DSP Professor Reviews: database setup
+-- RateMyBrofessor (DSP professor reviews): database setup
 -- Paste this whole file into Supabase → SQL Editor → New query → Run.
 -- Safe to run again after making changes.
 -- =============================================================
@@ -23,10 +23,11 @@ create or replace function public.allowed_tags() returns text[]
 language sql immutable
 as $$
   select array[
-    'Clear lectures', 'Engaging', 'Caring', 'Accessible outside class',
-    'Tough grader', 'Lots of homework', 'Heavy reading', 'Test heavy',
-    'Group projects', 'Attendance required', 'Participation matters',
-    'Curves exams', 'Extra credit', 'Lecture heavy'
+    'Tough Grader', 'Get Ready to Read', 'Participation Matters', 'Extra Credit',
+    'Group Projects', 'Amazing Lectures', 'Clear Grading Criteria', 'Gives Good Feedback',
+    'Inspirational', 'Lots of Homework', 'Hilarious', 'Beware of Pop Quizzes',
+    'So Many Papers', 'Caring', 'Respected', 'Lecture Heavy',
+    'Test Heavy', 'Graded By Few Things', 'Accessible Outside Class', 'Online Savvy'
   ]::text[]
 $$;
 
@@ -55,9 +56,9 @@ create table if not exists public.reviews (
   overall smallint not null check (overall between 1 and 5),
   difficulty smallint not null check (difficulty between 1 and 5),
   take_again boolean not null,
-  grade text check (grade in ('A', 'B', 'C', 'D', 'F', 'Pass', 'Withdrew')),
-  tags text[] not null default '{}' check (cardinality(tags) <= 5),
-  body text not null check (char_length(body) between 50 and 1000),
+  grade text,
+  tags text[] not null default '{}',
+  body text not null,
   flagged boolean not null default false,
   flag_reason text,
   -- Reviews are anonymous. Whoever posts one gets a secret kept in their
@@ -67,6 +68,21 @@ create table if not exists public.reviews (
   updated_at timestamptz not null default now()
 );
 create index if not exists reviews_professor_id_idx on public.reviews (professor_id);
+
+-- Columns and rules matching the RateMyBrofessor Google Form questions.
+-- Written as changes so re-running this file upgrades an existing database.
+alter table public.reviews add column if not exists attendance_mandatory boolean;
+alter table public.reviews add column if not exists other_tag text;
+
+alter table public.reviews drop constraint if exists reviews_grade_check;
+alter table public.reviews add constraint reviews_grade_check check (grade in (
+  'A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F', 'S', 'NS', 'Dropped'));
+alter table public.reviews drop constraint if exists reviews_tags_check;
+alter table public.reviews add constraint reviews_tags_check check (cardinality(tags) <= 25);
+alter table public.reviews drop constraint if exists reviews_body_check;
+alter table public.reviews add constraint reviews_body_check check (char_length(body) between 10 and 3000);
+alter table public.reviews drop constraint if exists reviews_other_tag_check;
+alter table public.reviews add constraint reviews_other_tag_check check (char_length(other_tag) between 1 and 40);
 
 -- ---------- Access rules ----------
 -- Nobody can read anything unless signed in as one of the two chapter logins.
@@ -86,7 +102,7 @@ revoke all on public.professors, public.reviews from anon, authenticated;
 grant select on public.professors to authenticated;
 -- Members can't see edit tokens or report details.
 grant select (id, professor_id, course_code, semester, overall, difficulty, take_again,
-              grade, tags, body, created_at, updated_at)
+              attendance_mandatory, grade, tags, other_tag, body, created_at, updated_at)
   on public.reviews to authenticated;
 
 -- ---------- Professor stats ----------
@@ -99,7 +115,8 @@ select
   round(avg(r.overall), 2) as avg_overall,
   round(avg(r.difficulty), 2) as avg_difficulty,
   round(100.0 * avg(r.take_again::int))::int as pct_take_again,
-  coalesce(array_agg(distinct r.course_code) filter (where r.course_code is not null), '{}') as courses
+  coalesce(array_agg(distinct r.course_code) filter (where r.course_code is not null), '{}') as courses,
+  round(100.0 * avg(r.attendance_mandatory::int))::int as pct_attendance_mandatory
 from public.professors p
 left join public.reviews r on r.professor_id = p.id
 group by p.id;
@@ -125,9 +142,14 @@ begin
 end
 $$;
 
+-- Older versions without attendance/other tag; dropped so they don't linger as overloads.
+drop function if exists public.submit_review(bigint, text, text, int, int, boolean, text, text[], text, text);
+drop function if exists public.update_review(bigint, text, text, text, int, int, boolean, text, text[], text);
+
 create or replace function public.submit_review(
   p_professor_id bigint, p_course text, p_semester text, p_overall int, p_difficulty int,
-  p_take_again boolean, p_grade text, p_tags text[], p_body text, p_token text
+  p_take_again boolean, p_attendance_mandatory boolean, p_grade text, p_tags text[], p_other_tag text,
+  p_body text, p_token text
 ) returns bigint
 language plpgsql security definer set search_path = public
 as $$
@@ -135,12 +157,13 @@ declare v_id bigint;
 begin
   if not is_member() then raise exception 'Not signed in'; end if;
   if p_token is null or length(p_token) < 32 then raise exception 'Invalid edit token'; end if;
+  if p_attendance_mandatory is null then raise exception 'Please answer whether attendance is mandatory'; end if;
   if not (coalesce(p_tags, '{}') <@ allowed_tags()) then raise exception 'Unknown tag'; end if;
   insert into reviews (professor_id, course_code, semester, overall, difficulty, take_again,
-                       grade, tags, body, edit_token_hash)
+                       attendance_mandatory, grade, tags, other_tag, body, edit_token_hash)
   values (p_professor_id, normalize_course(p_course), p_semester, p_overall, p_difficulty, p_take_again,
-          nullif(p_grade, ''), coalesce(p_tags, '{}'), trim(p_body),
-          encode(sha256(convert_to(p_token, 'UTF8')), 'hex'))
+          p_attendance_mandatory, nullif(p_grade, ''), coalesce(p_tags, '{}'), nullif(trim(p_other_tag), ''),
+          trim(p_body), encode(sha256(convert_to(p_token, 'UTF8')), 'hex'))
   returning id into v_id;
   return v_id;
 end
@@ -148,12 +171,14 @@ $$;
 
 create or replace function public.update_review(
   p_id bigint, p_token text, p_course text, p_semester text, p_overall int, p_difficulty int,
-  p_take_again boolean, p_grade text, p_tags text[], p_body text
+  p_take_again boolean, p_attendance_mandatory boolean, p_grade text, p_tags text[], p_other_tag text,
+  p_body text
 ) returns void
 language plpgsql security definer set search_path = public
 as $$
 begin
   if not is_member() then raise exception 'Not signed in'; end if;
+  if p_attendance_mandatory is null then raise exception 'Please answer whether attendance is mandatory'; end if;
   if not (coalesce(p_tags, '{}') <@ allowed_tags()) then raise exception 'Unknown tag'; end if;
   update reviews set
     course_code = normalize_course(p_course),
@@ -161,8 +186,10 @@ begin
     overall = p_overall,
     difficulty = p_difficulty,
     take_again = p_take_again,
+    attendance_mandatory = p_attendance_mandatory,
     grade = nullif(p_grade, ''),
     tags = coalesce(p_tags, '{}'),
+    other_tag = nullif(trim(p_other_tag), ''),
     body = trim(p_body),
     updated_at = now()
   where id = p_id

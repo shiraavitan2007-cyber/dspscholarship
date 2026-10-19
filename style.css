@@ -64,12 +64,13 @@ h1, h2, h3 { line-height: 1.2; }
 .topbar { background: var(--brand); color: var(--brand-ink); border-bottom: 3px solid var(--accent); position: sticky; top: 0; z-index: 10; }
 .topbar-inner { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; }
 .brand { color: var(--brand-ink); text-decoration: none; font-weight: 700; font-size: 1.05rem; white-space: nowrap; }
-.brand span { font-weight: 400; }
 .topbar nav { display: flex; align-items: center; gap: 14px; }
 .topbar nav a:not(.btn), .topbar nav .link { color: var(--brand-ink); opacity: 0.9; font-size: 0.9rem; }
 .topbar .btn { background: var(--accent); color: #1c1a22; }
-@media (max-width: 480px) {
-  .brand span { display: none; }
+@media (max-width: 420px) {
+  .topbar nav { gap: 10px; }
+  .topbar nav a:not(.btn), .topbar nav .link { font-size: 0.82rem; }
+  .topbar .btn-small { padding: 6px 10px; font-size: 0.82rem; }
 }
 
 /* Buttons */
@@ -133,7 +134,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand); out
 .prof-header { display: flex; gap: 16px; align-items: center; margin: 8px 0 16px; }
 .prof-header h1 { margin: 0; font-size: 1.6rem; }
 .prof-header p { margin: 2px 0 0; }
-.stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+@media (max-width: 560px) { .stat-row { grid-template-columns: repeat(2, 1fr); } }
 .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px; text-align: center; }
 .stat strong { display: block; font-size: 1.3rem; }
 .stat span { font-size: 0.8rem; color: var(--muted); }
@@ -155,7 +157,10 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand); out
 .score b { font-size: 1rem; }
 .score.neutral { background: var(--none-bg); color: var(--text); }
 .review-meta { margin: 10px 0 4px; font-size: 0.92rem; }
+.review-facts { margin: 0 0 4px; font-size: 0.88rem; color: var(--muted); }
 .review-body { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.guidelines p { margin: 0 0 4px; }
+.other-tag { margin-top: 10px; }
 .review-actions { display: flex; gap: 16px; align-items: center; font-size: 0.88rem; }
 
 /* Review form */
