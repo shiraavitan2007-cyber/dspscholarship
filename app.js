@@ -547,16 +547,50 @@ async function renderAdmin(view) {
     h("section", { class: "admin-section" }, h("h2", {}, `Reported reviews (${flagged.length})`), flaggedList),
     h("section", { class: "admin-section" }, h("h2", {}, `Professors (${profs.length})`),
       profRows.length ? h("div", { class: "card" }, profRows) : h("p", { class: "muted" }, "No professors yet.")),
-    h("section", { class: "admin-section" }, h("h2", {}, "Chapter password"),
-      h("p", { class: "muted" }, "After changing the member password in Supabase, sign everyone out so they need the new one."),
-      h("button", {
-        type: "button", class: "btn btn-small danger",
-        onclick: async () => {
-          if (confirm("Sign out every device using the member password?") && await act("admin_sign_out_members")) {
-            alert("Done. Member devices will be signed out within the hour.");
-          }
-        },
-      }, "Sign out all member devices")));
+    h("section", { class: "admin-section" }, h("h2", {}, "Change passwords"),
+      passwordForm("member", "Chapter password",
+        "The password brothers use. Everyone gets signed out within the hour and needs the new one."),
+      passwordForm("admin", "Admin password", "The password officers use for this Admin page.")));
+}
+
+function passwordForm(which, title, description) {
+  const id = `pw-${which}`;
+  const input = h("input", { type: "password", id, autocomplete: "new-password", minlength: 8, required: true });
+  const repeat = h("input", { type: "password", id: `${id}-2`, autocomplete: "new-password", minlength: 8, required: true });
+  const msg = h("p", { class: "hint", hidden: true });
+  const btn = h("button", { class: "btn btn-small", type: "submit" }, `Change ${title.toLowerCase()}`);
+
+  const form = h("form", { class: "card password-form" },
+    h("h3", {}, title),
+    h("p", { class: "muted small" }, description),
+    field("New password (at least 8 characters)", id, input),
+    field("Type it again", `${id}-2`, repeat),
+    msg,
+    btn);
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    msg.hidden = true;
+    msg.className = "error";
+    if (input.value !== repeat.value) {
+      msg.textContent = "The two passwords don't match.";
+      msg.hidden = false;
+      return;
+    }
+    if (!confirm(`Change the ${title.toLowerCase()}?`)) return;
+    btn.disabled = true;
+    try {
+      await call("admin_set_password", { p_which: which, p_new_password: input.value });
+      form.reset();
+      msg.className = "hint";
+      msg.textContent = `${title} changed. Share the new one with the people who need it.`;
+    } catch (err) {
+      msg.textContent = "Couldn't change it: " + err.message;
+    }
+    msg.hidden = false;
+    btn.disabled = false;
+  });
+  return form;
 }
 
 // ---------- Start ----------

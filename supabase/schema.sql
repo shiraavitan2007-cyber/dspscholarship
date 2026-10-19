@@ -250,6 +250,56 @@ begin
 end
 $$;
 
+-- ---------- Password lock ----------
+-- Everyone knows the chapter password, so anyone could otherwise change it
+-- (or the login's email) through Supabase's API and lock the chapter out.
+-- This blocks every change to the two shared logins made through Supabase Auth,
+-- including the dashboard. Passwords are changed only via admin_set_password()
+-- from the site's Admin page.
+create or replace function public.lock_shared_logins() returns trigger
+language plpgsql
+as $$
+begin
+  if old.email in ('members@dspscholarship.com', 'admin@dspscholarship.com')
+     and current_user <> 'postgres'
+     and (new.encrypted_password is distinct from old.encrypted_password
+          or new.email is distinct from old.email
+          or coalesce(new.email_change, '') is distinct from coalesce(old.email_change, '')
+          or new.phone is distinct from old.phone
+          or coalesce(new.phone_change, '') is distinct from coalesce(old.phone_change, '')) then
+    raise exception 'The shared chapter logins can only be changed from the site''s Admin page';
+  end if;
+  return new;
+end
+$$;
+
+drop trigger if exists lock_shared_logins on auth.users;
+create trigger lock_shared_logins before update on auth.users
+  for each row execute function public.lock_shared_logins();
+
+-- p_which: 'member' or 'admin'. Changing the member password also signs out every member device.
+create or replace function public.admin_set_password(p_which text, p_new_password text) returns void
+language plpgsql security definer set search_path = public
+as $$
+declare v_email text;
+begin
+  if not is_admin() then raise exception 'Admins only'; end if;
+  if char_length(p_new_password) < 8 then raise exception 'Password must be at least 8 characters'; end if;
+  v_email := case p_which when 'member' then 'members@dspscholarship.com'
+                          when 'admin' then 'admin@dspscholarship.com' end;
+  if v_email is null then raise exception 'Unknown login'; end if;
+  update auth.users
+    set encrypted_password = extensions.crypt(p_new_password, extensions.gen_salt('bf', 10)),
+        updated_at = now()
+    where email = v_email;
+  if p_which = 'member' then
+    delete from auth.sessions where user_id in (select id from auth.users where email = v_email);
+  end if;
+end
+$$;
+
 -- Only signed-in users may call functions; each one checks member/admin itself.
 revoke execute on all functions in schema public from public, anon;
 grant execute on all functions in schema public to authenticated;
+-- Supabase Auth's own role must be able to run the trigger.
+grant execute on function public.lock_shared_logins() to supabase_auth_admin;

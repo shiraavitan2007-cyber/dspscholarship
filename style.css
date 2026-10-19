@@ -196,3 +196,6 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand); out
 .admin-section .review { margin-bottom: 10px; }
 .admin-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .admin-row:last-child { border-bottom: none; }
+.password-form { margin-bottom: 12px; }
+.password-form h3 { margin: 0 0 2px; font-size: 1rem; }
+.password-form p { margin: 0; }
