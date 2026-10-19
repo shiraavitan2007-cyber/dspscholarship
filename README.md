@@ -1,7 +1,8 @@
 # DSP Professor Reviews
 
 Internal professor reviews for our Delta Sigma Pi chapter, live at https://dspscholarship.com.
-Hosted on GitHub Pages; reviews are stored in Supabase.
+Hosted on GitHub Pages; reviews are stored in Supabase (project `dsp-professor-reviews`:
+https://supabase.com/dashboard/project/ntmfodbezvygvmgblhwy).
 
 ## How access works
 - There are two shared logins in Supabase (Authentication → Users):
