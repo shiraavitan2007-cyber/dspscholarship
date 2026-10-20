@@ -56,6 +56,9 @@ git add . && git commit -m "Describe the change" && git push
 ```
 The site updates in about a minute. Don't delete the `CNAME` file; it keeps the domain connected.
 
+When you change `app.js`, `style.css`, or `config.js`, also bump the `?v=` number on those links in
+`index.html` (e.g. `2026-10-20.1` → `2026-10-20.2`). Otherwise phones may keep showing the old version.
+
 ## Files
 - `index.html`, `app.js`, `style.css`: the site
 - `config.js`: Supabase project URL + anon key (public by design)
