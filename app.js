@@ -209,7 +209,7 @@ function quarterForDate(date = new Date()) {
   return `${m < 3 ? "Winter" : m < 6 ? "Spring" : m < 8 ? "Summer" : "Autumn"} ${date.getFullYear()}`;
 }
 
-// ---------- WhatsBroTaking data ----------
+// ---------- What'sBroTaking data ----------
 
 const WBT_NAME = "dsp-wbt-name"; // the name this device last saved a schedule under
 
@@ -369,8 +369,8 @@ function bottomNav(app, active) {
     icon(iconName), label);
   const apps = item("apps", "#/", "Apps", "grid");
   if (app === "wbt") {
-    return h("nav", { class: "bottom-nav", "aria-label": "WhatsBroTaking" },
-      item("classes", "#/wbt", "Classes"),
+    return h("nav", { class: "bottom-nav", "aria-label": "What'sBroTaking" },
+      item("classes", "#/wbt", "This quarter"),
       item("brothers", "#/wbt/brothers", "Brothers", "people"),
       h("a", { href: "#/wbt/add", class: "nav-plus", "aria-label": "Add my classes" }, icon("plus")),
       item("reviews", "#/rate", "Reviews", "star"),
@@ -412,14 +412,14 @@ async function renderHub(view) {
         h("span", { class: "tile-name" }, "RateMy", h("br"), h("span", {}, "Bro"), "fessor")),
       h("a", { href: "#/wbt", class: "tile purple" },
         h("span", { class: "tile-icon" }, icon("people")),
-        h("span", { class: "tile-name" }, "Whats", h("br"), h("span", {}, "Bro"), "Taking"))),
+        h("span", { class: "tile-name" }, "What's", h("br"), h("span", {}, "Bro"), "Taking"))),
     h("p", { class: "hub-links" },
       isAdmin() && h("a", { href: "#/admin" }, "Admin"),
       isAdmin() && h("span", { "aria-hidden": "true" }, "·"),
       h("button", { type: "button", class: "link muted", onclick: signOut }, "Sign out"))));
 }
 
-// ---------- WhatsBroTaking ----------
+// ---------- What'sBroTaking ----------
 
 const enc = encodeURIComponent;
 const classesWord = (n) => `${n} ${n === 1 ? "class" : "classes"}`;
@@ -428,7 +428,7 @@ function wbtHero(title, quarter, extra) {
   return h("header", { class: "hero" },
     h("div", { class: "wrap" },
       h("div", { class: "hero-top" },
-        h("a", { href: "#/wbt", class: "wordmark small" }, "Whats", h("span", {}, "Bro"), "Taking"),
+        h("a", { href: "#/wbt", class: "wordmark small" }, "What's", h("span", {}, "Bro"), "Taking"),
         h("span", { class: "crest" }, quarter)),
       h("h1", {}, title),
       extra));
@@ -1160,7 +1160,7 @@ async function renderClass(view, code) {
         icon("people"),
         h("span", { class: "grow" }, takingNow
           ? [h("b", {}, `${plural(takingNow, "brother")} ${takingNow === 1 ? "is" : "are"} taking this`), ` in ${current}`]
-          : [h("b", {}, "WhatsBroTaking"), `: see who's taking ${code} in ${current}`]),
+          : [h("b", {}, "What'sBroTaking"), `: see who's taking ${code} in ${current}`]),
         "›"),
       h("a", { href: `#/review/new?course=${encodeURIComponent(code)}`, class: "btn gold block" }, `Review a ${code} professor`),
       h("div", { class: "list" },
@@ -1556,7 +1556,7 @@ async function renderAdmin(view) {
       h("p", { class: "signout-line" }, h("button", { type: "button", class: "link muted", onclick: signOut }, "Sign out of this device"))));
 }
 
-// WhatsBroTaking tools: current quarter, fix schedules, clear old quarters.
+// What'sBroTaking tools: current quarter, fix schedules, clear old quarters.
 function wbtAdmin(current, schedules, quarters) {
   const [curTerm, curYear] = current.split(" ");
   const thisYear = new Date().getFullYear();
@@ -1565,7 +1565,7 @@ function wbtAdmin(current, schedules, quarters) {
   const year = h("select", { class: "input", "aria-label": "Year", value: curYear }, years.map((y) => h("option", { value: String(y) }, y)));
   const setQuarter = h("form", { class: "panel" },
     h("h3", {}, "Current quarter"),
-    h("p", { class: "row-sub" }, "WhatsBroTaking shows and collects this quarter by default. Set it to the upcoming quarter once registration opens."),
+    h("p", { class: "row-sub" }, "What'sBroTaking shows and collects this quarter by default. Set it to the upcoming quarter once registration opens."),
     h("div", { class: "inline-fields" }, term, year, h("button", { type: "submit", class: "btn purple small" }, "Save")));
   setQuarter.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1598,7 +1598,7 @@ function wbtAdmin(current, schedules, quarters) {
     h("div", { class: "inline-fields" }, clearSelect, h("button", { type: "submit", class: "btn danger small" }, "Clear")));
   clear.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!confirm(`Delete ALL WhatsBroTaking schedules for ${clearSelect.value}?`)) return;
+    if (!confirm(`Delete ALL What'sBroTaking schedules for ${clearSelect.value}?`)) return;
     try {
       const n = await call("admin_clear_quarter", { p_quarter: clearSelect.value });
       alert(`Deleted ${plural(n, "schedule")}.`);
@@ -1609,7 +1609,7 @@ function wbtAdmin(current, schedules, quarters) {
   });
 
   return h("section", {},
-    h("div", { class: "section-head" }, h("h2", {}, "WhatsBroTaking")),
+    h("div", { class: "section-head" }, h("h2", {}, "What'sBroTaking")),
     setQuarter,
     h("div", { class: "panel" },
       h("h3", {}, `${current} schedules (${schedules.length})`),
