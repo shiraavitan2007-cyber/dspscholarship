@@ -373,7 +373,6 @@ function bottomNav(app, active) {
       item("classes", "#/wbt", "This quarter"),
       item("brothers", "#/wbt/brothers", "Brothers", "people"),
       h("a", { href: "#/wbt/add", class: "nav-plus", "aria-label": "Add my classes" }, icon("plus")),
-      item("reviews", "#/rate", "Reviews", "star"),
       apps);
   }
   return h("nav", { class: "bottom-nav", "aria-label": "RateMyBrofessor" },
