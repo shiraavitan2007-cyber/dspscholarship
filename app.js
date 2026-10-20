@@ -47,6 +47,7 @@ const ICONS = {
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>',
   people: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.8c1.9.7 3.2 2.4 3.5 5.2"/></svg>',
+  person: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4.2 4-6.5 8-6.5s7.2 2.3 8 6.5"/></svg>',
   star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></svg>',
   signout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
 };
@@ -211,7 +212,6 @@ function quarterForDate(date = new Date()) {
 
 // ---------- What'sBroTaking data ----------
 
-const WBT_NAME = "dsp-wbt-name"; // the name this device last saved a schedule under
 
 async function loadCurrentQuarter() {
   const row = await q(supabase.from("app_settings").select("current_quarter").maybeSingle());
@@ -219,7 +219,7 @@ async function loadCurrentQuarter() {
 }
 // Every schedule (and its classes) for one quarter.
 async function loadQuarter(quarter) {
-  const schedules = await q(supabase.from("schedules").select("id, quarter, full_name, updated_at").eq("quarter", quarter).order("full_name"));
+  const schedules = await q(supabase.from("schedules").select("id, quarter, brother_id, full_name, updated_at").eq("quarter", quarter).order("full_name"));
   const ids = schedules.map((s) => s.id);
   const classes = ids.length
     ? await q(supabase.from("schedule_classes").select("id, schedule_id, course_code, section, quiz_section").in("schedule_id", ids))
@@ -334,7 +334,7 @@ async function render() {
   // Which app's tab bar to show: the hub and Admin have none.
   const section = parts[0] === "wbt" ? "wbt" : !parts[0] || parts[0] === "admin" ? "hub" : "rmb";
   const tab = section === "wbt"
-    ? { class: "classes", brothers: "brothers", brother: "brothers", add: "add" }[parts[1]] || "classes"
+    ? { class: "classes", brothers: "brothers", brother: "brothers", add: "add", profile: "profile" }[parts[1]] || "classes"
     : { rate: "home", search: "search", classes: "classes", class: "classes" }[parts[0]] || "";
   app.replaceChildren(...[view, section !== "hub" && bottomNav(section, tab)].filter(Boolean));
   document.body.classList.add("signed-in");
@@ -348,7 +348,8 @@ async function render() {
       if (parts[1] === "class" && parts[2]) await renderWbtClass(view, decodeURIComponent(parts[2]), quarter);
       else if (parts[1] === "brothers") await renderWbtBrothers(view, quarter);
       else if (parts[1] === "brother" && parts[2]) await renderWbtBrother(view, Number(parts[2]));
-      else if (parts[1] === "add") await renderWbtForm(view, quarter, params.get("name") || "");
+      else if (parts[1] === "add") await renderWbtForm(view, quarter);
+      else if (parts[1] === "profile") await renderWbtProfile(view, params.get("next"));
       else await renderWbtHome(view, quarter);
     } else if (parts[0] === "prof" && parts[1]) await renderProfessor(view, Number(parts[1]));
     else if (parts[0] === "review" && parts[1] === "new") {
@@ -373,6 +374,7 @@ function bottomNav(app, active) {
       item("classes", "#/wbt", "This quarter"),
       item("brothers", "#/wbt/brothers", "Brothers", "people"),
       h("a", { href: "#/wbt/add", class: "nav-plus", "aria-label": "Add my classes" }, icon("plus")),
+      item("profile", "#/wbt/profile", "Profile", "person"),
       apps);
   }
   return h("nav", { class: "bottom-nav", "aria-label": "RateMyBrofessor" },
@@ -584,8 +586,23 @@ async function renderWbtBrothers(view, requested) {
   update();
 }
 
+// A schedule's classes as tappable rows. `others(code)` counts other brothers in that class (optional).
+function scheduleClassRows(classes, catalog, quarter, others) {
+  return h("div", { class: "list" },
+    [...classes].sort((a, b) => a.course_code.localeCompare(b.course_code)).map((c) => {
+      const n = others?.(c.course_code);
+      return h("a", { href: `#/wbt/class/${enc(c.course_code)}?quarter=${enc(quarter)}`, class: "list-row" },
+        h("span", { class: "code-badge" }, coursePrefix(c.course_code)),
+        h("div", { class: "grow" },
+          h("div", { class: "row-title" }, c.course_code),
+          courseTitle(catalog, c.course_code) && h("div", { class: "row-sub strong" }, courseTitle(catalog, c.course_code)),
+          h("div", { class: "row-sub" }, [sectionLabel(c), n == null ? null : n ? plural(n, "other brother") : "No other brothers yet"].filter(Boolean).join(" · "))),
+        "›");
+    }));
+}
+
 async function renderWbtBrother(view, id) {
-  const s = await q(supabase.from("schedules").select("id, quarter, full_name, updated_at").eq("id", id).maybeSingle());
+  const s = await q(supabase.from("schedules").select("id, quarter, brother_id, full_name, updated_at").eq("id", id).maybeSingle());
   if (!s) {
     view.replaceChildren(pageHeader("Not found", { back: "#/wbt/brothers" }), h("main", { class: "wrap page" }, h("p", {}, "This schedule was deleted or doesn't exist.")));
     return;
@@ -593,18 +610,7 @@ async function renderWbtBrother(view, id) {
   const [everyone, catalog] = await Promise.all([loadQuarter(s.quarter), loadCatalog()]);
   const me = everyone.find((x) => x.id === id) || { ...s, classes: [] };
   const classmates = (code) => everyone.filter((x) => x.id !== id && x.classes.some((c) => c.course_code === code)).length;
-
-  async function deleteSchedule() {
-    const pin = prompt(`Enter the 4-digit PIN for ${s.full_name}'s ${s.quarter} classes to delete them.`);
-    if (pin === null) return;
-    try {
-      const result = await call("delete_schedule", { p_id: id, p_pin: pin.trim() });
-      if (!result.ok) return alert(result.error);
-      location.hash = `#/wbt?quarter=${enc(s.quarter)}`;
-    } catch (err) {
-      alert(err.message);
-    }
-  }
+  const mine = getProfile()?.id === s.brother_id;
 
   view.replaceChildren(
     h("header", { class: "prof-hero" },
@@ -616,42 +622,226 @@ async function renderWbtBrother(view, id) {
             h("h1", {}, s.full_name),
             h("p", { class: "on-purple-muted" }, `${s.quarter} · ${classesWord(me.classes.length)}`))))),
     h("main", { class: "wrap page" },
-      h("div", { class: "list" },
-        [...me.classes].sort((a, b) => a.course_code.localeCompare(b.course_code)).map((c) => {
-          const others = classmates(c.course_code);
-          return h("a", { href: `#/wbt/class/${enc(c.course_code)}?quarter=${enc(s.quarter)}`, class: "list-row" },
-            h("span", { class: "code-badge" }, coursePrefix(c.course_code)),
-            h("div", { class: "grow" },
-              h("div", { class: "row-title" }, c.course_code),
-              courseTitle(catalog, c.course_code) && h("div", { class: "row-sub strong" }, courseTitle(catalog, c.course_code)),
-              h("div", { class: "row-sub" }, [sectionLabel(c), others ? `${plural(others, "other brother")}` : "No other brothers yet"].filter(Boolean).join(" · "))),
-            "›");
-        })),
-      h("div", { class: "action-row" },
-        h("a", { href: `#/wbt/add?quarter=${enc(s.quarter)}&name=${enc(s.full_name)}`, class: "btn purple small" }, "Edit these classes"),
-        h("button", { type: "button", class: "link muted", onclick: deleteSchedule }, "Delete"))));
+      scheduleClassRows(me.classes, catalog, s.quarter, classmates),
+      mine && h("div", { class: "action-row" },
+        h("a", { href: `#/wbt/add?quarter=${enc(s.quarter)}`, class: "btn purple small" }, "Edit my classes"),
+        h("a", { href: "#/wbt/profile" }, "My profile"))));
 }
 
-async function renderWbtForm(view, requested, presetName) {
+// ---------- What'sBroTaking profiles ----------
+
+const WBT_PROFILE = "dsp-wbt-profile"; // { token, id, full_name } of the profile signed in on this device
+function getProfile() {
+  const p = load(WBT_PROFILE);
+  return p.token ? p : null;
+}
+function setProfile(p) {
+  save(WBT_PROFILE, p);
+}
+function clearProfile() {
+  try { localStorage.removeItem(WBT_PROFILE); } catch { /* storage unavailable */ }
+}
+// Goes to `hash`, re-rendering if we're already there.
+function go(hash) {
+  if (location.hash === hash) render();
+  else location.hash = hash;
+}
+// Server errors that mean this device's profile sign-in is no longer valid.
+function profileExpired(err) {
+  return /Signed out of your profile/.test(err.message || "");
+}
+
+async function renderWbtProfile(view, next) {
+  let profile = getProfile();
+  if (profile) {
+    const me = await call("profile_me", { p_token: profile.token });
+    if (!me.ok) {
+      clearProfile();
+      profile = null;
+    } else if (me.full_name !== profile.full_name) {
+      profile = { ...profile, full_name: me.full_name };
+      setProfile(profile);
+    }
+  }
+  if (!profile) return renderProfileSignIn(view, next);
+
+  const [current, catalog] = await Promise.all([loadCurrentQuarter(), loadCatalog()]);
+  const mine = await q(supabase.from("schedules").select("id, quarter, brother_id, full_name, updated_at").eq("brother_id", profile.id));
+  const ids = mine.map((s) => s.id);
+  const classes = ids.length ? await q(supabase.from("schedule_classes").select("id, schedule_id, course_code, section, quiz_section").in("schedule_id", ids)) : [];
+  const withClasses = mine.map((s) => ({ ...s, classes: classes.filter((c) => c.schedule_id === s.id) }))
+    .sort((a, b) => byQuarter(b.quarter, a.quarter));
+  const now = withClasses.find((s) => s.quarter === current);
+  const others = withClasses.filter((s) => s.quarter !== current);
+
+  async function signOutProfile() {
+    try { await call("profile_sign_out", { p_token: profile.token }); } catch { /* signing out locally is what matters */ }
+    clearProfile();
+    render();
+  }
+
+  view.replaceChildren(
+    h("header", { class: "prof-hero" },
+      h("div", { class: "wrap" },
+        h("a", { href: "#/wbt", class: "round-btn on-purple", "aria-label": "Back" }, icon("back")),
+        h("div", { class: "prof-id" },
+          h("span", { class: "prof-avatar" }, initials(profile.full_name)),
+          h("div", {},
+            h("h1", {}, profile.full_name),
+            h("p", { class: "on-purple-muted" }, "Your What'sBroTaking profile"))))),
+    h("main", { class: "wrap page" },
+      h("section", {},
+        h("div", { class: "section-head" }, h("h2", {}, `My ${current} classes`)),
+        now
+          ? [scheduleClassRows(now.classes, catalog, current),
+            h("div", { class: "action-row" },
+              h("a", { href: `#/wbt/add?quarter=${enc(current)}`, class: "btn purple small" }, "Edit classes"),
+              h("button", {
+                type: "button", class: "link muted",
+                onclick: async () => {
+                  if (!confirm(`Delete your ${current} classes?`)) return;
+                  try {
+                    await call("delete_my_schedule", { p_token: profile.token, p_schedule_id: now.id });
+                    render();
+                  } catch (err) {
+                    if (profileExpired(err)) { clearProfile(); render(); } else alert(err.message);
+                  }
+                },
+              }, "Delete"))]
+          : h("div", { class: "empty" },
+            h("p", {}, `You haven't added your ${current} classes yet.`),
+            h("a", { href: `#/wbt/add?quarter=${enc(current)}`, class: "btn gold" }, icon("plus"), `Add my ${current} classes`))),
+      others.length > 0 && h("section", {},
+        h("div", { class: "section-head" }, h("h2", {}, "Other quarters")),
+        h("div", { class: "list" }, others.map((s) => h("a", { href: `#/wbt/brother/${s.id}`, class: "list-row" },
+          h("span", { class: "code-badge" }, s.quarter.split(" ")[0].slice(0, 3).toUpperCase()),
+          h("div", { class: "grow" },
+            h("div", { class: "row-title" }, s.quarter),
+            h("div", { class: "row-sub" }, `${classesWord(s.classes.length)}: ${s.classes.map((c) => c.course_code).sort().join(", ")}`)),
+          "›")))),
+      changePinPanel(profile),
+      h("p", { class: "signout-line" },
+        h("button", { type: "button", class: "link muted", onclick: signOutProfile }, "Sign out of my profile on this device"))));
+}
+
+function changePinPanel(profile) {
+  const pinField = (id, label) => field(label, id, h("input", { id, class: "input pin", type: "password", inputmode: "numeric", maxlength: 4, pattern: "[0-9]{4}", autocomplete: "off", required: true, placeholder: "••••" }));
+  const msg = h("p", { class: "hint", hidden: true });
+  const form = h("form", {},
+    pinField("old-pin", "Current PIN"),
+    pinField("new-pin", "New PIN"),
+    pinField("new-pin2", "New PIN again"),
+    msg,
+    h("button", { type: "submit", class: "btn purple small" }, "Change PIN"));
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const [oldPin, newPin, newPin2] = ["old-pin", "new-pin", "new-pin2"].map((id) => form.querySelector(`#${id}`).value.trim());
+    msg.className = "error";
+    msg.hidden = false;
+    if (!/^\d{4}$/.test(newPin)) { msg.textContent = "Your new PIN must be 4 digits."; return; }
+    if (newPin !== newPin2) { msg.textContent = "The new PINs don't match."; return; }
+    try {
+      const r = await call("change_my_pin", { p_token: profile.token, p_old_pin: oldPin, p_new_pin: newPin });
+      if (!r.ok) { msg.textContent = r.error === "Wrong PIN" ? "Your current PIN is wrong." : r.error; return; }
+      form.reset();
+      msg.className = "hint";
+      msg.textContent = "PIN changed.";
+    } catch (err) {
+      msg.textContent = err.message;
+    }
+  });
+  return h("details", { class: "panel" }, h("summary", {}, "Change my PIN"), form);
+}
+
+function renderProfileSignIn(view, next) {
+  let mode = "signin";
+  let savedName = "";
+  try { savedName = localStorage.getItem("dsp-wbt-name") || ""; } catch { /* storage unavailable */ }
+
+  const modes = h("div", { class: "pills", role: "group", "aria-label": "Sign in or create a profile" });
+  const nameInput = h("input", { id: "p-name", class: "input", required: true, maxlength: 80, autocomplete: "name", placeholder: "First and last name", value: savedName });
+  const pinInput = h("input", { id: "p-pin", class: "input pin", type: "password", inputmode: "numeric", maxlength: 4, pattern: "[0-9]{4}", autocomplete: "off", required: true, placeholder: "••••" });
+  const pin2Input = h("input", { id: "p-pin2", class: "input pin", type: "password", inputmode: "numeric", maxlength: 4, pattern: "[0-9]{4}", autocomplete: "off", placeholder: "••••" });
+  const pinLabel = h("label", { for: "p-pin" });
+  const pinHint = h("p", { class: "hint" });
+  const pin2Field = field("Type it again", "p-pin2", pin2Input);
+  const status = h("p", { class: "error", hidden: true });
+  const submit = h("button", { type: "submit", class: "btn gold block big" });
+  const intro = h("p", { class: "row-sub" });
+
+  function update() {
+    modes.replaceChildren(
+      h("button", { type: "button", class: "pill", "aria-pressed": String(mode === "signin"), onclick: () => { mode = "signin"; update(); } }, "Sign in"),
+      h("button", { type: "button", class: "pill", "aria-pressed": String(mode === "create"), onclick: () => { mode = "create"; update(); } }, "Create profile"));
+    const creating = mode === "create";
+    intro.textContent = creating
+      ? "First time? Create your profile with your full name and a 4-digit PIN. You'll use them to sign in on any phone."
+      : "Sign in with your full name and PIN to add and edit your classes. You'll stay signed in on this phone.";
+    pinLabel.textContent = creating ? "Choose a 4-digit PIN" : "PIN";
+    pinHint.textContent = creating ? "Don't share it. You'll need it to sign in on other devices." : "";
+    pin2Field.hidden = !creating;
+    pin2Input.required = creating;
+    submit.textContent = creating ? "Create my profile" : "Sign in";
+    status.hidden = true;
+  }
+
+  const form = h("form", { class: "review-form wrap" },
+    h("div", { class: "form-top" },
+      h("a", { href: "#/wbt", class: "round-btn", "aria-label": "Close" }, icon("close")),
+      h("span", { class: "row-sub" }, "What'sBroTaking")),
+    h("div", { class: "form-intro" }, h("h1", {}, "My profile"), intro),
+    modes,
+    h("div", { class: "q" },
+      field("Full name", "p-name", nameInput),
+      h("div", { class: "field" }, pinLabel, pinHint, pinInput),
+      pin2Field,
+      h("p", { class: "hint" }, "Your name and classes are visible to every brother who signs in.")),
+    status,
+    submit);
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    status.hidden = true;
+    const name = nameInput.value.trim().replace(/\s+/g, " ");
+    const pin = pinInput.value.trim();
+    const fail = (text) => { status.textContent = text; status.hidden = false; submit.disabled = false; };
+    if (name.split(" ").length < 2) return fail("Please enter your full name (first and last).");
+    if (!/^\d{4}$/.test(pin)) return fail("Your PIN must be 4 digits.");
+    if (mode === "create" && pin !== pin2Input.value.trim()) return fail("The two PINs don't match.");
+    submit.disabled = true;
+    try {
+      const r = await call(mode === "create" ? "create_profile" : "profile_sign_in", { p_full_name: name, p_pin: pin });
+      if (!r.ok) return fail(r.error);
+      setProfile({ token: r.token, id: r.id, full_name: r.full_name });
+      go(next === "add" ? "#/wbt/add" : "#/wbt/profile");
+    } catch (err) {
+      fail(err.message);
+    }
+  });
+
+  update();
+  view.replaceChildren(form);
+}
+
+async function renderWbtForm(view, requested) {
+  const profile = getProfile();
+  if (!profile) {
+    go("#/wbt/profile?next=add");
+    return;
+  }
   const [current, catalog] = await Promise.all([loadCurrentQuarter(), loadCatalog()]);
   const options = [shiftQuarter(current, -1), current, shiftQuarter(current, 1)];
   let quarter = requested && /^(Autumn|Winter|Spring|Summer) \d{4}$/.test(requested) ? requested : current;
   if (!options.includes(quarter)) options.push(quarter);
   options.sort(byQuarter);
-  let schedules = await loadQuarter(quarter);
 
-  let savedName = "";
-  try { savedName = localStorage.getItem(WBT_NAME) || ""; } catch { /* storage unavailable */ }
+  async function loadMine(qtr) {
+    const s = await q(supabase.from("schedules").select("id").eq("brother_id", profile.id).eq("quarter", qtr).maybeSingle());
+    return s ? q(supabase.from("schedule_classes").select("course_code, section, quiz_section").eq("schedule_id", s.id)) : [];
+  }
 
   const quarterSelect = h("select", { id: "wbt-quarter", class: "input", value: quarter }, options.map((o) => h("option", { value: o }, o)));
-  const nameInput = h("input", { id: "wbt-name", class: "input", required: true, maxlength: 80, autocomplete: "name", placeholder: "First and last name", value: presetName || savedName });
   const intro = h("p", { class: "row-sub" });
-  const pinInput = h("input", { id: "wbt-pin", class: "input pin", type: "password", inputmode: "numeric", maxlength: 4, pattern: "[0-9]{4}", autocomplete: "off", required: true, placeholder: "••••" });
-  const pin2Input = h("input", { id: "wbt-pin2", class: "input pin", type: "password", inputmode: "numeric", maxlength: 4, pattern: "[0-9]{4}", autocomplete: "off", placeholder: "••••" });
-  const pinLabel = h("label", { for: "wbt-pin" });
-  const pinHint = h("p", { class: "hint" });
-  const pin2Field = field("Type it again", "wbt-pin2", pin2Input);
-  const notice = h("p", { class: "notice", hidden: true });
 
   // Class rows (4 to start, like the Google Form, plus "Add another class")
   const rowsBox = h("div", { class: "class-rows" });
@@ -695,60 +885,31 @@ async function renderWbtForm(view, requested, presetName) {
     for (const c of classes) addRow(c);
     while (rows.length < 4) addRow();
   }
-
-  // Existing schedule for this name + quarter? Then it's an update and needs the PIN.
-  const cleanName = () => nameInput.value.trim().replace(/\s+/g, " ");
-  let existing = null;
-  let filledFor = null;
-  function updateMode() {
-    intro.replaceChildren("Add your ", h("strong", {}, "registered"), ` classes for ${quarter}. Brothers can see who's in their classes before the quarter starts.`);
-    existing = schedules.find((s) => s.full_name.toLowerCase() === cleanName().toLowerCase()) || null;
-    if (existing) {
-      notice.textContent = `You already added ${quarter} classes as ${existing.full_name}. Make your changes and enter your PIN to save them.`;
-      notice.hidden = false;
-      pinLabel.textContent = "Your PIN";
-      pinHint.textContent = "The 4-digit PIN you chose when you first added your classes.";
-      pin2Field.hidden = true;
-      pin2Input.required = false;
-      if (filledFor !== existing.id) { fill(existing.classes); filledFor = existing.id; }
-    } else {
-      notice.hidden = true;
-      pinLabel.textContent = "Choose a 4-digit PIN";
-      pinHint.textContent = "You'll need it to edit or delete your classes later, from any device.";
-      pin2Field.hidden = false;
-      pin2Input.required = true;
-      if (filledFor !== null) { fill([]); filledFor = null; }
-    }
+  function updateIntro(hasClasses) {
+    intro.replaceChildren(hasClasses ? `Update your ` : "Add your ", h("strong", {}, "registered"),
+      ` classes for ${quarter}. Brothers can see who's in their classes before the quarter starts.`);
   }
-  nameInput.addEventListener("change", updateMode);
-  nameInput.addEventListener("blur", updateMode);
   quarterSelect.addEventListener("change", async () => {
     quarter = quarterSelect.value;
-    schedules = await loadQuarter(quarter);
-    filledFor = null;
-    fill([]);
-    updateMode();
+    const classes = await loadMine(quarter);
+    fill(classes);
+    updateIntro(classes.length > 0);
   });
 
   const status = h("p", { class: "error", hidden: true });
   const submit = h("button", { class: "btn gold block big", type: "submit" }, "Save my classes");
   const form = h("form", { class: "review-form wrap" },
     h("div", { class: "form-top" },
-      h("a", { href: `#/wbt?quarter=${enc(quarter)}`, class: "round-btn", "aria-label": "Close" }, icon("close")),
+      h("a", { href: "#/wbt/profile", class: "round-btn", "aria-label": "Close" }, icon("close")),
       h("span", { class: "row-sub" }, "Visible to brothers")),
     h("div", { class: "form-intro" }, h("h1", {}, "What's Bro Taking?"), intro),
     h("div", { class: "q" },
-      field("Quarter", "wbt-quarter", quarterSelect),
-      field("Full name", "wbt-name", nameInput),
-      h("p", { class: "hint" }, "Your name and classes are visible to every brother who signs in."),
-      notice),
+      h("p", { class: "signed-in-as" }, "Adding as ", h("strong", {}, profile.full_name), " · ", h("a", { href: "#/wbt/profile" }, "Not you?")),
+      field("Quarter", "wbt-quarter", quarterSelect)),
     h("fieldset", { class: "q" }, h("legend", {}, "Your classes"),
       h("p", { class: "hint" }, "Include your registered section, plus your quiz section if you have one (e.g. ACCTG 215, section A, quiz section AB)."),
       rowsBox,
       h("button", { type: "button", class: "btn add-row", onclick: () => addRow().picker.input.focus() }, icon("plus"), "Add another class")),
-    h("div", { class: "q" },
-      h("div", { class: "field" }, pinLabel, pinHint, pinInput),
-      pin2Field),
     status,
     submit);
 
@@ -761,10 +922,6 @@ async function renderWbtForm(view, requested, presetName) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     status.hidden = true;
-    updateMode();
-    const name = cleanName();
-    if (name.split(" ").length < 2) return showStatus("Please enter your full name (first and last).");
-
     const entries = rows
       .map((r) => ({ raw: r.picker.input.value.trim(), code: r.picker.code(), section: r.section.value.trim().toUpperCase(), quiz: r.quiz.value.trim().toUpperCase() }))
       .filter((x) => x.raw);
@@ -774,37 +931,35 @@ async function renderWbtForm(view, requested, presetName) {
       rows.find((r) => r.picker.input.value.trim() === missing.raw)?.section.focus();
       return showStatus(`Add your section for ${missing.code || normalizeCourse(missing.raw)} (e.g. A).`);
     }
-    if (entries.some((x) => (x.section && !/^[A-Z0-9]{1,3}$/.test(x.section)) || (x.quiz && !/^[A-Z0-9]{1,3}$/.test(x.quiz)))) {
+    if (entries.some((x) => !/^[A-Z0-9]{1,3}$/.test(x.section) || (x.quiz && !/^[A-Z0-9]{1,3}$/.test(x.quiz)))) {
       return showStatus("Sections are letters or numbers only, like A or AB.");
     }
     const unknown = entries.filter((x) => !x.code).map((x) => normalizeCourse(x.raw));
     if (unknown.length && catalog.list.length
       && !confirm(`${unknown.join(", ")} ${unknown.length === 1 ? "isn't" : "aren't"} in the UW course catalog. Save anyway? (Tap Cancel to fix it.)`)) return;
 
-    const pin = pinInput.value.trim();
-    if (!/^\d{4}$/.test(pin)) return showStatus("Your PIN must be 4 digits.");
-    if (!existing && pin !== pin2Input.value.trim()) return showStatus("The two PINs don't match.");
-
     submit.disabled = true;
     try {
-      const result = await call("save_schedule", {
-        p_quarter: quarter, p_full_name: name, p_pin: pin,
-        p_classes: entries.map((x) => ({ course: x.code || normalizeCourse(x.raw), section: x.section || null, quiz: x.quiz || null })),
+      const id = await call("save_my_schedule", {
+        p_token: profile.token, p_quarter: quarter,
+        p_classes: entries.map((x) => ({ course: x.code || normalizeCourse(x.raw), section: x.section, quiz: x.quiz || null })),
       });
-      if (!result.ok) {
-        submit.disabled = false;
-        return showStatus(result.error === "Wrong PIN" ? `Wrong PIN for ${name}'s ${quarter} classes.` : result.error);
-      }
-      try { localStorage.setItem(WBT_NAME, name); } catch { /* storage unavailable */ }
-      location.hash = `#/wbt/brother/${result.id}`;
+      location.hash = `#/wbt/brother/${id}`;
     } catch (err) {
+      if (profileExpired(err)) {
+        clearProfile();
+        alert("You've been signed out of your profile. Sign in again to save.");
+        go("#/wbt/profile?next=add");
+        return;
+      }
       showStatus("Couldn't save: " + err.message);
       submit.disabled = false;
     }
   });
 
-  fill([]);
-  updateMode();
+  const existing = await loadMine(quarter);
+  fill(existing);
+  updateIntro(existing.length > 0);
   view.replaceChildren(form);
 }
 
@@ -1503,7 +1658,10 @@ async function renderAdmin(view) {
     q(supabase.from("professor_stats").select("id, name, department, review_count").order("name")),
     loadCurrentQuarter(),
   ]);
-  const [schedules, quarters] = await Promise.all([loadQuarter(current), loadQuarterList(current)]);
+  const [schedules, quarters, brothers] = await Promise.all([
+    loadQuarter(current), loadQuarterList(current),
+    q(supabase.from("brothers").select("id, full_name").order("full_name")),
+  ]);
 
   const flaggedList = flagged.length
     ? flagged.map((r) => h("article", { class: "panel" },
@@ -1544,7 +1702,7 @@ async function renderAdmin(view) {
   view.replaceChildren(
     pageHeader("Admin", { back: "#/", subtitle: "Signed in with the admin password." }),
     h("main", { class: "wrap page" },
-      wbtAdmin(current, schedules, quarters),
+      wbtAdmin(current, schedules, quarters, brothers),
       h("section", {}, h("div", { class: "section-head" }, h("h2", {}, `Reported reviews (${flagged.length})`)), flaggedList),
       h("section", {}, h("div", { class: "section-head" }, h("h2", {}, `Professors (${profs.length})`)),
         profRows.length ? h("div", { class: "panel" }, profRows) : h("p", { class: "muted" }, "No professors yet.")),
@@ -1556,7 +1714,7 @@ async function renderAdmin(view) {
 }
 
 // What'sBroTaking tools: current quarter, fix schedules, clear old quarters.
-function wbtAdmin(current, schedules, quarters) {
+function wbtAdmin(current, schedules, quarters, brothers) {
   const [curTerm, curYear] = current.split(" ");
   const thisYear = new Date().getFullYear();
   const term = h("select", { class: "input", "aria-label": "Quarter", value: curTerm }, TERMS.map((t) => h("option", { value: t }, t)));
@@ -1575,19 +1733,31 @@ function wbtAdmin(current, schedules, quarters) {
     h("div", {}, h("strong", {}, s.full_name), h("div", { class: "row-sub" }, classesWord(s.classes.length))),
     h("div", { class: "review-actions" },
       h("button", {
+        type: "button", class: "link danger-text",
+        onclick: async () => {
+          if (confirm(`Delete ${s.full_name}'s ${current} classes?`) && await act("admin_delete_schedule", { p_id: s.id })) render();
+        },
+      }, "Delete classes"))));
+
+  const profileRows = brothers.map((b) => h("div", { class: "admin-row" },
+    h("strong", {}, b.full_name),
+    h("div", { class: "review-actions" },
+      h("button", {
         type: "button", class: "link",
         onclick: async () => {
-          const pin = prompt(`New 4-digit PIN for ${s.full_name}:`);
+          const pin = prompt(`New 4-digit PIN for ${b.full_name}:`);
           if (pin === null) return;
-          if (await act("admin_reset_schedule_pin", { p_id: s.id, p_pin: pin.trim() })) alert(`PIN reset. Tell ${s.full_name} the new PIN.`);
+          if (await act("admin_reset_profile_pin", { p_brother_id: b.id, p_pin: pin.trim() })) {
+            alert(`PIN reset. Tell ${b.full_name} the new PIN. They'll need to sign in again.`);
+          }
         },
       }, "Reset PIN"),
       h("button", {
         type: "button", class: "link danger-text",
         onclick: async () => {
-          if (confirm(`Delete ${s.full_name}'s ${current} classes?`) && await act("admin_delete_schedule", { p_id: s.id })) render();
+          if (confirm(`Delete ${b.full_name}'s profile and ALL their classes, every quarter?`) && await act("admin_delete_profile", { p_brother_id: b.id })) render();
         },
-      }, "Delete"))));
+      }, "Delete profile"))));
 
   const old = quarters.filter((qtr) => qtr !== current);
   const clearSelect = h("select", { class: "input", "aria-label": "Quarter to clear" }, old.map((qtr) => h("option", { value: qtr }, qtr)));
@@ -1613,6 +1783,10 @@ function wbtAdmin(current, schedules, quarters) {
     h("div", { class: "panel" },
       h("h3", {}, `${current} schedules (${schedules.length})`),
       rows.length ? rows : h("p", { class: "row-sub" }, "No one has added classes yet.")),
+    h("div", { class: "panel" },
+      h("h3", {}, `Profiles (${brothers.length})`),
+      h("p", { class: "row-sub" }, "Forgot a PIN? Reset it here and tell the brother the new one."),
+      profileRows.length ? profileRows : h("p", { class: "row-sub" }, "No profiles yet.")),
     old.length > 0 && clear);
 }
 
