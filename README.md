@@ -37,6 +37,22 @@ Members can tap **Report** on any review. Sign in with the admin password → **
 - **Keep** clears the report; **Delete** removes the review.
 - Under **Professors** you can fix a name or department, or delete a duplicate professor (this deletes their reviews too).
 
+## The two apps
+After signing in, brothers land on a hub page with two apps:
+- **RateMyBrofessor** (`#/rate`): anonymous professor reviews.
+- **WhatsBroTaking** (`#/wbt`): which classes brothers are registered for each quarter.
+
+## WhatsBroTaking
+- Brothers add their **full name**, the quarter, and their classes (UW class picker, optional
+  section and quiz section). Names and classes are visible to everyone signed in.
+- The first time, they choose a **4-digit PIN**. Re-entering the same name later loads their
+  classes; saving changes or deleting needs the PIN. Five wrong PINs lock that schedule for 15 minutes.
+- **Forgotten PIN:** Admin → WhatsBroTaking → Reset PIN, then tell the brother the new one.
+- **Current quarter:** Admin → WhatsBroTaking → Current quarter. Set it to the upcoming
+  quarter once registration opens, so the form and pages default to it.
+- **Old quarters:** Admin → Clear an old quarter deletes all schedules for it.
+- Names in WhatsBroTaking are never linked to RateMyBrofessor reviews.
+
 ## UW classes
 The class picker, course titles, and Classes search use `uw-courses.json`, a list of every
 UW Seattle course built from the official catalog (https://www.washington.edu/students/crscat/).

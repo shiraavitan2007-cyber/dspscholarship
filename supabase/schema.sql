@@ -342,8 +342,179 @@ begin
 end
 $$;
 
+-- =============================================================
+-- WhatsBroTaking: classes brothers are registered for, by quarter
+-- =============================================================
+
+-- One row: which quarter the site treats as "current".
+create table if not exists public.app_settings (
+  id int primary key default 1 check (id = 1),
+  current_quarter text not null check (current_quarter ~ '^(Autumn|Winter|Spring|Summer) [0-9]{4}$')
+);
+insert into public.app_settings (id, current_quarter) values (1, 'Winter 2027') on conflict (id) do nothing;
+
+create table if not exists public.schedules (
+  id bigint generated always as identity primary key,
+  quarter text not null check (quarter ~ '^(Autumn|Winter|Spring|Summer) [0-9]{4}$'),
+  full_name text not null check (char_length(full_name) between 2 and 80),
+  -- 4-digit PIN to edit from any device; only its bcrypt hash is stored.
+  pin_hash text not null,
+  failed_attempts int not null default 0,
+  locked_until timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists schedules_quarter_name_key on public.schedules (quarter, lower(full_name));
+
+create table if not exists public.schedule_classes (
+  id bigint generated always as identity primary key,
+  schedule_id bigint not null references public.schedules (id) on delete cascade,
+  course_code text not null check (char_length(course_code) between 2 and 20),
+  section text check (section ~ '^[A-Z0-9]{1,3}$'),
+  quiz_section text check (quiz_section ~ '^[A-Z0-9]{1,3}$'),
+  unique (schedule_id, course_code)
+);
+create index if not exists schedule_classes_course_idx on public.schedule_classes (course_code);
+
+alter table public.app_settings enable row level security;
+alter table public.schedules enable row level security;
+alter table public.schedule_classes enable row level security;
+
+drop policy if exists "members read settings" on public.app_settings;
+create policy "members read settings" on public.app_settings for select to authenticated using (public.is_member());
+drop policy if exists "members read schedules" on public.schedules;
+create policy "members read schedules" on public.schedules for select to authenticated using (public.is_member());
+drop policy if exists "members read schedule classes" on public.schedule_classes;
+create policy "members read schedule classes" on public.schedule_classes for select to authenticated using (public.is_member());
+
+revoke all on public.app_settings, public.schedules, public.schedule_classes from anon, authenticated;
+grant select on public.app_settings, public.schedule_classes to authenticated;
+-- Members can't see PIN hashes or lockout state.
+grant select (id, quarter, full_name, created_at, updated_at) on public.schedules to authenticated;
+
+-- Checks a schedule's PIN. Returns an error message, or null when the PIN is right.
+-- Five wrong PINs lock the schedule for 15 minutes. Callers must NOT raise on a
+-- wrong PIN (that would undo the attempt counter); they return the message instead.
+create or replace function public._check_schedule_pin(p_id bigint, p_pin text) returns text
+language plpgsql security definer set search_path = public
+as $$
+declare s schedules;
+begin
+  select * into s from schedules where id = p_id for update;
+  if not found then return 'Schedule not found'; end if;
+  if s.locked_until > now() then return 'Too many wrong PINs. Try again in 15 minutes.'; end if;
+  if s.pin_hash = extensions.crypt(coalesce(p_pin, ''), s.pin_hash) then
+    update schedules set failed_attempts = 0, locked_until = null where id = p_id;
+    return null;
+  end if;
+  if s.failed_attempts + 1 >= 5 then
+    update schedules set failed_attempts = 0, locked_until = now() + interval '15 minutes' where id = p_id;
+    return 'Too many wrong PINs. Try again in 15 minutes.';
+  end if;
+  update schedules set failed_attempts = failed_attempts + 1 where id = p_id;
+  return 'Wrong PIN';
+end
+$$;
+
+-- Creates a schedule, or replaces its classes when the name already has one (PIN required).
+-- p_classes: [{"course": "FIN 350", "section": "A", "quiz": "AB"}, ...]
+-- Returns {"ok": true, "id": …} or {"ok": false, "error": "…"}.
+create or replace function public.save_schedule(p_quarter text, p_full_name text, p_pin text, p_classes jsonb) returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_id bigint;
+  v_error text;
+  v_name text := regexp_replace(trim(coalesce(p_full_name, '')), '\s+', ' ', 'g');
+  c jsonb;
+begin
+  if not is_member() then raise exception 'Not signed in'; end if;
+  if coalesce(p_pin, '') !~ '^[0-9]{4}$' then raise exception 'PIN must be 4 digits'; end if;
+  if jsonb_typeof(p_classes) <> 'array' or jsonb_array_length(p_classes) not between 1 and 12 then
+    raise exception 'Add between 1 and 12 classes';
+  end if;
+
+  select id into v_id from schedules where quarter = p_quarter and lower(full_name) = lower(v_name);
+  if v_id is null then
+    insert into schedules (quarter, full_name, pin_hash)
+      values (p_quarter, v_name, extensions.crypt(p_pin, extensions.gen_salt('bf', 8)))
+      returning id into v_id;
+  else
+    v_error := _check_schedule_pin(v_id, p_pin);
+    if v_error is not null then return jsonb_build_object('ok', false, 'error', v_error); end if;
+    update schedules set full_name = v_name, updated_at = now() where id = v_id;
+    delete from schedule_classes where schedule_id = v_id;
+  end if;
+
+  for c in select * from jsonb_array_elements(p_classes) loop
+    insert into schedule_classes (schedule_id, course_code, section, quiz_section)
+    values (v_id, normalize_course(c ->> 'course'),
+            nullif(upper(trim(coalesce(c ->> 'section', ''))), ''),
+            nullif(upper(trim(coalesce(c ->> 'quiz', ''))), ''))
+    on conflict (schedule_id, course_code) do nothing;
+  end loop;
+  return jsonb_build_object('ok', true, 'id', v_id);
+end
+$$;
+
+create or replace function public.delete_schedule(p_id bigint, p_pin text) returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare v_error text;
+begin
+  if not is_member() then raise exception 'Not signed in'; end if;
+  v_error := _check_schedule_pin(p_id, p_pin);
+  if v_error is not null then return jsonb_build_object('ok', false, 'error', v_error); end if;
+  delete from schedules where id = p_id;
+  return jsonb_build_object('ok', true);
+end
+$$;
+
+create or replace function public.admin_set_current_quarter(p_quarter text) returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not is_admin() then raise exception 'Admins only'; end if;
+  update app_settings set current_quarter = p_quarter where id = 1;
+end
+$$;
+
+create or replace function public.admin_delete_schedule(p_id bigint) returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not is_admin() then raise exception 'Admins only'; end if;
+  delete from schedules where id = p_id;
+end
+$$;
+
+create or replace function public.admin_reset_schedule_pin(p_id bigint, p_pin text) returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not is_admin() then raise exception 'Admins only'; end if;
+  if coalesce(p_pin, '') !~ '^[0-9]{4}$' then raise exception 'PIN must be 4 digits'; end if;
+  update schedules set pin_hash = extensions.crypt(p_pin, extensions.gen_salt('bf', 8)),
+    failed_attempts = 0, locked_until = null where id = p_id;
+end
+$$;
+
+create or replace function public.admin_clear_quarter(p_quarter text) returns int
+language plpgsql security definer set search_path = public
+as $$
+declare v_count int;
+begin
+  if not is_admin() then raise exception 'Admins only'; end if;
+  delete from schedules where quarter = p_quarter;
+  get diagnostics v_count = row_count;
+  return v_count;
+end
+$$;
+
 -- Only signed-in users may call functions; each one checks member/admin itself.
 revoke execute on all functions in schema public from public, anon;
 grant execute on all functions in schema public to authenticated;
 -- Supabase Auth's own role must be able to run the trigger.
 grant execute on function public.lock_shared_logins() to supabase_auth_admin;
+-- Internal helper: only callable from the schedule functions above.
+revoke execute on function public._check_schedule_pin(bigint, text) from authenticated;

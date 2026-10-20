@@ -354,6 +354,67 @@ select.input:disabled { cursor: default; opacity: 0.7; }
   border: 1px solid var(--line); background: var(--surface); font-size: 0.82rem; font-weight: 700; cursor: pointer;
 }
 
+/* ---------- Hub ---------- */
+body.no-nav { padding-bottom: 32px; }
+.hub-hero h1 { margin-bottom: 4px; }
+.hub-eyebrow { font-size: 0.8rem; font-weight: 700; color: var(--on-purple-muted); }
+.hub { display: flex; flex-direction: column; gap: 14px; padding-top: 22px; }
+.app-card {
+  display: flex; gap: 16px; align-items: center; padding: 20px; border-radius: 24px;
+  background: var(--surface); color: var(--ink); text-decoration: none; border: 2px solid transparent;
+}
+.app-card:hover { border-color: var(--gold); }
+.app-card.purple { background: var(--purple); color: #fff; }
+.app-icon {
+  flex: none; width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center;
+  background: var(--gold); color: var(--purple);
+}
+.app-icon .icon { width: 30px; height: 30px; }
+.app-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.app-name { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; }
+.app-name span { color: var(--purple); }
+.app-card.purple .app-name span { color: var(--gold); }
+.app-desc { font-size: 0.88rem; color: var(--muted); }
+.app-card.purple .app-desc { color: var(--on-purple-muted); }
+.app-teaser { margin-top: 6px; font-size: 0.78rem; font-weight: 800; color: var(--purple); }
+.app-card.purple .app-teaser { color: var(--gold); }
+.admin-link {
+  display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-radius: 18px;
+  background: var(--surface); color: var(--purple); font-weight: 800; text-decoration: none;
+}
+
+/* ---------- WhatsBroTaking ---------- */
+a.pill { display: inline-flex; align-items: center; text-decoration: none; }
+.pill[aria-current="true"] { background: var(--purple); border-color: var(--purple); color: #fff; }
+.summary { margin: 0 0 4px; font-size: 0.85rem; font-weight: 700; color: var(--muted); }
+.faces { display: flex; align-items: center; gap: 3px; margin-top: 6px; }
+.faces .mini { width: 24px; height: 24px; border-radius: 8px; font-size: 0.6rem; }
+.count-chip {
+  flex: none; display: flex; flex-direction: column; align-items: center; min-width: 52px; padding: 6px 8px; border-radius: 14px;
+  background: var(--purple); color: var(--gold); font-size: 1.15rem; font-weight: 800; line-height: 1.1;
+}
+.count-chip small { font-size: 0.6rem; font-weight: 700; color: var(--on-purple-muted); }
+.crosslink {
+  display: flex; align-items: center; gap: 12px; padding: 14px 16px; margin-bottom: 12px; border-radius: 18px;
+  background: var(--surface); color: var(--ink); text-decoration: none; font-size: 0.88rem; border: 2px solid var(--gold);
+}
+.crosslink .icon { color: var(--purple); }
+.action-row { display: flex; align-items: center; gap: 18px; margin-top: 14px; }
+.notice { margin: 4px 0 0; padding: 10px 12px; border-radius: 12px; background: #fff6d6; color: #4a3500; font-size: 0.85rem; font-weight: 600; }
+
+.class-rows { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
+.class-row { border: 1px solid var(--line); border-radius: 16px; padding: 12px; background: #fcfbfe; }
+.class-row-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 0.85rem; }
+.class-num { font-weight: 800; }
+.class-row .course-picked { margin: 6px 0 0; }
+.section-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.section-row label { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
+.small-input { padding: 10px 12px; text-transform: uppercase; }
+.btn.add-row { background: var(--bg); color: var(--purple); border: 2px dashed var(--line); width: 100%; }
+.input.pin { max-width: 160px; letter-spacing: 0.4em; font-size: 20px; text-align: center; }
+.inline-fields { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.inline-fields .input { width: auto; flex: 1 1 120px; }
+
 /* ---------- Admin ---------- */
 .panel { background: var(--surface); border-radius: var(--radius); padding: 16px; margin-bottom: 10px; }
 .panel h3 { margin: 0 0 2px; font-size: 1rem; }

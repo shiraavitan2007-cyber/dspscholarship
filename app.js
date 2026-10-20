@@ -45,6 +45,9 @@ const ICONS = {
   admin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/></svg>',
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>',
+  people: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.8c1.9.7 3.2 2.4 3.5 5.2"/></svg>',
+  star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></svg>',
   signout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
 };
 
@@ -141,6 +144,102 @@ function findCourses(catalog, text, limit = 8) {
   return [...byCode, ...byTitle].slice(0, limit);
 }
 
+// A UW class text box with a suggestion list. Returns the pieces to place in a form.
+let pickerCount = 0;
+function makeCoursePicker(catalog, { id = `course-${++pickerCount}`, value = "", required = false, label, onPick } = {}) {
+  const listId = `${id}-suggestions`;
+  const input = h("input", {
+    id, class: "input", required, maxlength: 20, placeholder: "e.g. FIN 350", autocapitalize: "characters",
+    autocomplete: "off", role: "combobox", "aria-autocomplete": "list", "aria-controls": listId, "aria-expanded": "false",
+    "aria-label": label, value,
+  });
+  const suggestions = h("div", { class: "suggestions", id: listId, role: "listbox", hidden: true });
+  const picked = h("p", { class: "course-picked" });
+  const code = () => catalog.byKey.get(compact(input.value));
+  function updatePicked() {
+    const c = code();
+    picked.textContent = c ? `${c} · ${courseTitle(catalog, c)}` : "";
+    return c;
+  }
+  function hide() {
+    suggestions.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+  }
+  function pick(c) {
+    input.value = c;
+    hide();
+    updatePicked();
+    onPick?.(c);
+  }
+  input.addEventListener("input", () => {
+    const exact = updatePicked();
+    const matches = findCourses(catalog, input.value, 6);
+    if (matches.length === 0 || (exact && matches.length === 1)) return hide();
+    suggestions.replaceChildren(...matches.map((c) => h("button", {
+      type: "button", class: "suggestion", role: "option",
+      onmousedown: (e) => e.preventDefault(), // keep focus so the click lands
+      onclick: () => pick(c.code),
+    }, h("b", {}, c.code), h("span", {}, c.title))));
+    suggestions.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  });
+  input.addEventListener("blur", () => setTimeout(hide, 150));
+  input.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+  updatePicked();
+  return { box: h("div", { class: "combo" }, input, suggestions), input, picked, code };
+}
+
+// ---------- UW quarters ----------
+
+const TERM_ORDER = { Winter: 1, Spring: 2, Summer: 3, Autumn: 4 };
+const quarterKey = (quarter) => {
+  const [term, year] = quarter.split(" ");
+  return Number(year) * 10 + (TERM_ORDER[term] || 0);
+};
+const byQuarter = (a, b) => quarterKey(a) - quarterKey(b);
+function shiftQuarter(quarter, steps) {
+  const order = ["Winter", "Spring", "Summer", "Autumn"];
+  let [term, year] = quarter.split(" ");
+  let i = order.indexOf(term) + steps;
+  year = Number(year) + Math.floor(i / 4);
+  return `${order[((i % 4) + 4) % 4]} ${year}`;
+}
+function quarterForDate(date = new Date()) {
+  const m = date.getMonth();
+  return `${m < 3 ? "Winter" : m < 6 ? "Spring" : m < 8 ? "Summer" : "Autumn"} ${date.getFullYear()}`;
+}
+
+// ---------- WhatsBroTaking data ----------
+
+const WBT_NAME = "dsp-wbt-name"; // the name this device last saved a schedule under
+
+async function loadCurrentQuarter() {
+  const row = await q(supabase.from("app_settings").select("current_quarter").maybeSingle());
+  return row?.current_quarter || quarterForDate();
+}
+// Every schedule (and its classes) for one quarter.
+async function loadQuarter(quarter) {
+  const schedules = await q(supabase.from("schedules").select("id, quarter, full_name, updated_at").eq("quarter", quarter).order("full_name"));
+  const ids = schedules.map((s) => s.id);
+  const classes = ids.length
+    ? await q(supabase.from("schedule_classes").select("id, schedule_id, course_code, section, quiz_section").in("schedule_id", ids))
+    : [];
+  const byId = new Map(schedules.map((s) => [s.id, { ...s, classes: [] }]));
+  for (const c of classes) byId.get(c.schedule_id)?.classes.push(c);
+  return [...byId.values()];
+}
+// Quarters that have schedules, plus the current one, oldest first.
+async function loadQuarterList(current) {
+  const rows = await q(supabase.from("schedules").select("quarter"));
+  return [...new Set([current, ...rows.map((r) => r.quarter)])].sort(byQuarter);
+}
+function sectionLabel(c) {
+  return [c.section && `Section ${c.section}`, c.quiz_section && `Quiz ${c.quiz_section}`].filter(Boolean).join(" · ");
+}
+function personAvatar(schedule, cls = "avatar") {
+  return avatar({ id: schedule.id, name: schedule.full_name }, cls);
+}
+
 function isAdmin() {
   return session?.user?.email === CONFIG.ADMIN_EMAIL;
 }
@@ -232,12 +331,26 @@ async function render() {
   const parts = (path || "/").split("/").filter(Boolean);
   const params = new URLSearchParams(queryString || "");
   const view = h("div", { class: "view" }, h("p", { class: "wrap muted loading" }, "Loading…"));
-  const tab = { search: "search", classes: "classes", class: "classes", admin: "admin", review: "review" }[parts[0]] || "home";
-  app.replaceChildren(view, bottomNav(tab));
+  // Which app's tab bar to show: the hub and Admin have none.
+  const section = parts[0] === "wbt" ? "wbt" : !parts[0] || parts[0] === "admin" ? "hub" : "rmb";
+  const tab = section === "wbt"
+    ? { class: "classes", brothers: "brothers", brother: "brothers", add: "add" }[parts[1]] || "classes"
+    : { rate: "home", search: "search", classes: "classes", class: "classes" }[parts[0]] || "";
+  app.replaceChildren(...[view, section !== "hub" && bottomNav(section, tab)].filter(Boolean));
   document.body.classList.add("signed-in");
+  document.body.classList.toggle("no-nav", section === "hub");
 
   try {
-    if (parts[0] === "prof" && parts[1]) await renderProfessor(view, Number(parts[1]));
+    if (!parts[0]) await renderHub(view);
+    else if (parts[0] === "rate") await renderHome(view);
+    else if (parts[0] === "wbt") {
+      const quarter = params.get("quarter");
+      if (parts[1] === "class" && parts[2]) await renderWbtClass(view, decodeURIComponent(parts[2]), quarter);
+      else if (parts[1] === "brothers") await renderWbtBrothers(view, quarter);
+      else if (parts[1] === "brother" && parts[2]) await renderWbtBrother(view, Number(parts[2]));
+      else if (parts[1] === "add") await renderWbtForm(view, quarter, params.get("name") || "");
+      else await renderWbtHome(view, quarter);
+    } else if (parts[0] === "prof" && parts[1]) await renderProfessor(view, Number(parts[1]));
     else if (parts[0] === "review" && parts[1] === "new") {
       await renderForm(view, { professorId: Number(params.get("prof")) || null, course: params.get("course") });
     } else if (parts[0] === "review" && parts[1] === "edit") await renderForm(view, { reviewId: Number(parts[2]) });
@@ -245,21 +358,30 @@ async function render() {
     else if (parts[0] === "classes") await renderClasses(view);
     else if (parts[0] === "class" && parts[1]) await renderClass(view, decodeURIComponent(parts[1]));
     else if (parts[0] === "admin") await renderAdmin(view);
-    else await renderHome(view);
+    else await renderHub(view);
   } catch (err) {
     view.replaceChildren(h("p", { class: "wrap error loading" }, "Something went wrong: ", err.message || String(err)));
   }
 }
 
-function bottomNav(active) {
-  const item = (name, href, label) => h("a", { href, class: `nav-item${active === name ? " active" : ""}`, "aria-current": active === name ? "page" : null },
-    icon(name), label);
-  return h("nav", { class: "bottom-nav", "aria-label": "Main" },
-    item("home", "#/", "Home"),
+function bottomNav(app, active) {
+  const item = (name, href, label, iconName = name) => h("a", { href, class: `nav-item${active === name ? " active" : ""}`, "aria-current": active === name ? "page" : null },
+    icon(iconName), label);
+  const apps = item("apps", "#/", "Apps", "grid");
+  if (app === "wbt") {
+    return h("nav", { class: "bottom-nav", "aria-label": "WhatsBroTaking" },
+      item("classes", "#/wbt", "Classes"),
+      item("brothers", "#/wbt/brothers", "Brothers", "people"),
+      h("a", { href: "#/wbt/add", class: "nav-plus", "aria-label": "Add my classes" }, icon("plus")),
+      item("reviews", "#/rate", "Reviews", "star"),
+      apps);
+  }
+  return h("nav", { class: "bottom-nav", "aria-label": "RateMyBrofessor" },
+    item("home", "#/rate", "Home"),
     item("search", "#/search", "Search"),
     h("a", { href: "#/review/new", class: "nav-plus", "aria-label": "Write a review" }, icon("plus")),
     item("classes", "#/classes", "Classes"),
-    isAdmin() ? item("admin", "#/admin", "Admin") : h("button", { type: "button", class: "nav-item", onclick: signOut }, icon("signout"), "Sign out"));
+    apps);
 }
 
 // Compact purple header used on every page except Home.
@@ -274,6 +396,424 @@ function pageHeader(title, { back, subtitle, extra } = {}) {
 
 function signOut() {
   supabase.auth.signOut({ scope: "local" });
+}
+
+// ---------- Hub (home after sign-in) ----------
+
+async function renderHub(view) {
+  const [reviews, current] = await Promise.all([q(supabase.from("reviews").select("id")), loadCurrentQuarter()]);
+  const schedules = await q(supabase.from("schedules").select("id").eq("quarter", current));
+  const brothers = schedules.length;
+
+  view.replaceChildren(
+    h("header", { class: "hero hub-hero" },
+      h("div", { class: "wrap" },
+        h("div", { class: "hero-top" },
+          h("span", { class: "hub-eyebrow" }, "Delta Sigma Pi · Scholarship"),
+          h("span", { class: "crest" }, "ΔΣΠ")),
+        h("h1", {}, "Hey brother. What do you need?"))),
+    h("main", { class: "wrap hub" },
+      h("a", { href: "#/rate", class: "app-card" },
+        h("span", { class: "app-icon gold" }, icon("star")),
+        h("span", { class: "app-text" },
+          h("span", { class: "app-name" }, "RateMy", h("span", {}, "Bro"), "fessor"),
+          h("span", { class: "app-desc" }, "Rate and read reviews of UW professors"),
+          h("span", { class: "app-teaser" }, reviews.length ? `${plural(reviews.length, "review")} from brothers` : "Be the first to write a review"))),
+      h("a", { href: "#/wbt", class: "app-card purple" },
+        h("span", { class: "app-icon" }, icon("people")),
+        h("span", { class: "app-text" },
+          h("span", { class: "app-name" }, "Whats", h("span", {}, "Bro"), "Taking"),
+          h("span", { class: "app-desc" }, "See what classes brothers are taking"),
+          h("span", { class: "app-teaser" }, brothers
+            ? `${plural(brothers, "brother")} ${brothers === 1 ? "has" : "have"} added ${current} classes`
+            : `Add your ${current} classes`))),
+      isAdmin() && h("a", { href: "#/admin", class: "admin-link" }, icon("admin"), "Admin tools"),
+      h("p", { class: "signout-line" }, h("button", { type: "button", class: "link muted", onclick: signOut }, "Sign out of this device"))));
+}
+
+// ---------- WhatsBroTaking ----------
+
+const enc = encodeURIComponent;
+const classesWord = (n) => `${n} ${n === 1 ? "class" : "classes"}`;
+
+function wbtHero(title, quarter, extra) {
+  return h("header", { class: "hero" },
+    h("div", { class: "wrap" },
+      h("div", { class: "hero-top" },
+        h("a", { href: "#/wbt", class: "wordmark small" }, "Whats", h("span", {}, "Bro"), "Taking"),
+        h("span", { class: "crest" }, quarter)),
+      h("h1", {}, title),
+      extra));
+}
+
+// Pills to switch quarters; `path` is the page to reopen with ?quarter=.
+function quarterPills(quarter, quarters, path) {
+  if (quarters.length < 2) return null;
+  return h("div", { class: "pills", role: "group", "aria-label": "Quarter" },
+    [...quarters].reverse().map((qtr) => h("a", {
+      href: `${path}?quarter=${enc(qtr)}`, class: "pill", "aria-current": qtr === quarter ? "true" : null,
+    }, qtr)));
+}
+
+function emptyWbt(quarter) {
+  return h("div", { class: "empty" },
+    h("p", {}, `No one has added their ${quarter} classes yet.`),
+    h("a", { href: `#/wbt/add?quarter=${enc(quarter)}`, class: "btn gold" }, "Add my classes"));
+}
+
+// Class -> brothers taking it, most popular first.
+function groupByClass(schedules) {
+  const map = new Map();
+  for (const s of schedules) {
+    for (const c of s.classes) {
+      const entry = map.get(c.course_code) || { code: c.course_code, people: [] };
+      entry.people.push(s);
+      map.set(c.course_code, entry);
+    }
+  }
+  return [...map.values()].sort((a, b) => b.people.length - a.people.length || a.code.localeCompare(b.code));
+}
+
+function wbtClassRow(c, catalog, quarter) {
+  const title = courseTitle(catalog, c.code);
+  return h("a", { href: `#/wbt/class/${enc(c.code)}?quarter=${enc(quarter)}`, class: "list-row" },
+    h("span", { class: "code-badge" }, coursePrefix(c.code)),
+    h("div", { class: "grow" },
+      h("div", { class: "row-title" }, c.code),
+      title && h("div", { class: "row-sub strong" }, title),
+      h("div", { class: "faces" },
+        c.people.slice(0, 6).map((s) => personAvatar(s, "mini")),
+        c.people.length > 6 && h("span", { class: "row-sub" }, `+${c.people.length - 6}`))),
+    h("span", { class: "count-chip" }, String(c.people.length), h("small", {}, c.people.length === 1 ? "brother" : "brothers")));
+}
+
+function brotherRow(s) {
+  const codes = s.classes.map((c) => c.course_code).sort();
+  return h("a", { href: `#/wbt/brother/${s.id}`, class: "list-row" },
+    personAvatar(s),
+    h("div", { class: "grow" },
+      h("div", { class: "row-title" }, s.full_name),
+      h("div", { class: "row-sub" }, `${classesWord(codes.length)}: ${codes.join(", ")}`)));
+}
+
+async function renderWbtHome(view, requested) {
+  const current = await loadCurrentQuarter();
+  const quarter = requested || current;
+  const [schedules, quarters, catalog] = await Promise.all([loadQuarter(quarter), loadQuarterList(current), loadCatalog()]);
+  const classes = groupByClass(schedules);
+
+  const search = h("input", { id: "wbt-search", type: "search", placeholder: "Class or brother's name", enterkeyhint: "search" });
+  const list = h("div", { class: "list" });
+  function update() {
+    const text = search.value.trim();
+    const key = compact(text);
+    const words = text.toLowerCase();
+    const people = text ? schedules.filter((s) => s.full_name.toLowerCase().includes(words)) : [];
+    const shown = text
+      ? classes.filter((c) => (key && compact(c.code).includes(key)) || courseTitle(catalog, c.code).toLowerCase().includes(words))
+      : classes;
+    list.replaceChildren(...[
+      people.length > 0 && h("p", { class: "list-label" }, "Brothers"),
+      ...people.map(brotherRow),
+      shown.length > 0 && h("p", { class: "list-label" }, text ? "Classes" : "Most-taken classes"),
+      ...shown.map((c) => wbtClassRow(c, catalog, quarter)),
+      people.length === 0 && shown.length === 0 && (schedules.length ? h("p", { class: "muted pad" }, "No matches.") : emptyWbt(quarter)),
+    ].filter(Boolean));
+  }
+  search.addEventListener("input", update);
+
+  view.replaceChildren(
+    wbtHero(`What's everyone taking in ${quarter}?`, quarter,
+      h("div", { class: "hero-search" }, icon("search"), h("label", { for: "wbt-search", class: "sr-only" }, "Search"), search)),
+    h("main", { class: "wrap page" },
+      quarterPills(quarter, quarters, "#/wbt"),
+      schedules.length > 0 && h("p", { class: "summary" }, `${plural(schedules.length, "brother")} · ${classesWord(classes.length)}`),
+      h("a", { href: `#/wbt/add?quarter=${enc(quarter)}`, class: "btn gold block" }, icon("plus"), "Add or edit my classes"),
+      list));
+  update();
+}
+
+async function renderWbtClass(view, code, requested) {
+  const current = await loadCurrentQuarter();
+  const quarter = requested || current;
+  const [schedules, catalog] = await Promise.all([loadQuarter(quarter), loadCatalog()]);
+  const title = courseTitle(catalog, code);
+  const dept = catalog.departments[coursePrefix(code)];
+  const taking = schedules.flatMap((s) => s.classes.filter((c) => c.course_code === code).map((c) => ({ s, c })));
+
+  // Group by lecture section; brothers without a section go last.
+  const groups = new Map();
+  for (const t of taking) {
+    const key = t.c.section || "";
+    groups.set(key, [...(groups.get(key) || []), t]);
+  }
+  const keys = [...groups.keys()].sort((a, b) => (a === "") - (b === "") || a.localeCompare(b));
+
+  view.replaceChildren(
+    pageHeader(code, {
+      back: `#/wbt?quarter=${enc(quarter)}`,
+      extra: h("div", { class: "class-header-info" },
+        title && h("p", { class: "class-header-title" }, title),
+        h("p", { class: "on-purple-muted" }, [dept, `${plural(taking.length, "brother")} in ${quarter}`].filter(Boolean).join(" · "))),
+    }),
+    h("main", { class: "wrap page" },
+      h("a", { href: `#/class/${enc(code)}`, class: "crosslink" },
+        icon("star"), h("span", { class: "grow" }, h("b", {}, "See reviews"), ` of ${code} professors on RateMyBrofessor`), "›"),
+      taking.length === 0
+        ? h("div", { class: "empty" },
+          h("p", {}, `No brothers have added ${code} for ${quarter} yet.`),
+          h("a", { href: `#/wbt/add?quarter=${enc(quarter)}`, class: "btn gold" }, "I'm taking this"))
+        : keys.map((key) => h("section", {},
+          h("p", { class: "list-label" }, key ? `Section ${key}` : "Section not given"),
+          h("div", { class: "list" }, groups.get(key).map(({ s, c }) => h("a", { href: `#/wbt/brother/${s.id}`, class: "list-row" },
+            personAvatar(s),
+            h("div", { class: "grow" },
+              h("div", { class: "row-title" }, s.full_name),
+              c.quiz_section && h("div", { class: "row-sub" }, `Quiz section ${c.quiz_section}`)))))))));
+}
+
+async function renderWbtBrothers(view, requested) {
+  const current = await loadCurrentQuarter();
+  const quarter = requested || current;
+  const [schedules, quarters] = await Promise.all([loadQuarter(quarter), loadQuarterList(current)]);
+
+  const search = h("input", { id: "brother-search", type: "search", placeholder: "Search by name" });
+  const list = h("div", { class: "list" });
+  function update() {
+    const words = search.value.trim().toLowerCase();
+    const rows = schedules.filter((s) => s.full_name.toLowerCase().includes(words));
+    list.replaceChildren(...(rows.length
+      ? rows.map(brotherRow)
+      : [schedules.length ? h("p", { class: "muted pad" }, "No brothers match.") : emptyWbt(quarter)]));
+  }
+  search.addEventListener("input", update);
+
+  view.replaceChildren(
+    pageHeader("Brothers", {
+      subtitle: `${plural(schedules.length, "brother")} added classes for ${quarter}`,
+      extra: h("div", { class: "header-search" }, icon("search"), h("label", { for: "brother-search", class: "sr-only" }, "Search brothers"), search),
+    }),
+    h("main", { class: "wrap page" }, quarterPills(quarter, quarters, "#/wbt/brothers"), list));
+  update();
+}
+
+async function renderWbtBrother(view, id) {
+  const s = await q(supabase.from("schedules").select("id, quarter, full_name, updated_at").eq("id", id).maybeSingle());
+  if (!s) {
+    view.replaceChildren(pageHeader("Not found", { back: "#/wbt/brothers" }), h("main", { class: "wrap page" }, h("p", {}, "This schedule was deleted or doesn't exist.")));
+    return;
+  }
+  const [everyone, catalog] = await Promise.all([loadQuarter(s.quarter), loadCatalog()]);
+  const me = everyone.find((x) => x.id === id) || { ...s, classes: [] };
+  const classmates = (code) => everyone.filter((x) => x.id !== id && x.classes.some((c) => c.course_code === code)).length;
+
+  async function deleteSchedule() {
+    const pin = prompt(`Enter the 4-digit PIN for ${s.full_name}'s ${s.quarter} classes to delete them.`);
+    if (pin === null) return;
+    try {
+      const result = await call("delete_schedule", { p_id: id, p_pin: pin.trim() });
+      if (!result.ok) return alert(result.error);
+      location.hash = `#/wbt?quarter=${enc(s.quarter)}`;
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  view.replaceChildren(
+    h("header", { class: "prof-hero" },
+      h("div", { class: "wrap" },
+        h("a", { href: `#/wbt/brothers?quarter=${enc(s.quarter)}`, class: "round-btn on-purple", "aria-label": "Back" }, icon("back")),
+        h("div", { class: "prof-id" },
+          h("span", { class: "prof-avatar" }, initials(s.full_name)),
+          h("div", {},
+            h("h1", {}, s.full_name),
+            h("p", { class: "on-purple-muted" }, `${s.quarter} · ${classesWord(me.classes.length)}`))))),
+    h("main", { class: "wrap page" },
+      h("div", { class: "list" },
+        [...me.classes].sort((a, b) => a.course_code.localeCompare(b.course_code)).map((c) => {
+          const others = classmates(c.course_code);
+          return h("a", { href: `#/wbt/class/${enc(c.course_code)}?quarter=${enc(s.quarter)}`, class: "list-row" },
+            h("span", { class: "code-badge" }, coursePrefix(c.course_code)),
+            h("div", { class: "grow" },
+              h("div", { class: "row-title" }, c.course_code),
+              courseTitle(catalog, c.course_code) && h("div", { class: "row-sub strong" }, courseTitle(catalog, c.course_code)),
+              h("div", { class: "row-sub" }, [sectionLabel(c), others ? `${plural(others, "other brother")}` : "No other brothers yet"].filter(Boolean).join(" · "))),
+            "›");
+        })),
+      h("div", { class: "action-row" },
+        h("a", { href: `#/wbt/add?quarter=${enc(s.quarter)}&name=${enc(s.full_name)}`, class: "btn purple small" }, "Edit these classes"),
+        h("button", { type: "button", class: "link muted", onclick: deleteSchedule }, "Delete"))));
+}
+
+async function renderWbtForm(view, requested, presetName) {
+  const [current, catalog] = await Promise.all([loadCurrentQuarter(), loadCatalog()]);
+  const options = [shiftQuarter(current, -1), current, shiftQuarter(current, 1)];
+  let quarter = requested && /^(Autumn|Winter|Spring|Summer) \d{4}$/.test(requested) ? requested : current;
+  if (!options.includes(quarter)) options.push(quarter);
+  options.sort(byQuarter);
+  let schedules = await loadQuarter(quarter);
+
+  let savedName = "";
+  try { savedName = localStorage.getItem(WBT_NAME) || ""; } catch { /* storage unavailable */ }
+
+  const quarterSelect = h("select", { id: "wbt-quarter", class: "input", value: quarter }, options.map((o) => h("option", { value: o }, o)));
+  const nameInput = h("input", { id: "wbt-name", class: "input", required: true, maxlength: 80, autocomplete: "name", placeholder: "First and last name", value: presetName || savedName });
+  const intro = h("p", { class: "row-sub" });
+  const pinInput = h("input", { id: "wbt-pin", class: "input pin", type: "password", inputmode: "numeric", maxlength: 4, pattern: "[0-9]{4}", autocomplete: "off", required: true, placeholder: "••••" });
+  const pin2Input = h("input", { id: "wbt-pin2", class: "input pin", type: "password", inputmode: "numeric", maxlength: 4, pattern: "[0-9]{4}", autocomplete: "off", placeholder: "••••" });
+  const pinLabel = h("label", { for: "wbt-pin" });
+  const pinHint = h("p", { class: "hint" });
+  const pin2Field = field("Type it again", "wbt-pin2", pin2Input);
+  const notice = h("p", { class: "notice", hidden: true });
+
+  // Class rows (4 to start, like the Google Form, plus "Add another class")
+  const rowsBox = h("div", { class: "class-rows" });
+  const rows = [];
+  function renumber() {
+    rows.forEach((r, i) => { r.num.textContent = `Class #${i + 1}`; r.picker.input.setAttribute("aria-label", `Class #${i + 1}`); });
+  }
+  function addRow(c = {}) {
+    const picker = makeCoursePicker(catalog, { value: c.course_code || "" });
+    const section = h("input", { class: "input small-input", maxlength: 3, placeholder: "A", autocapitalize: "characters", "aria-label": "Section", value: c.section || "" });
+    const quiz = h("input", { class: "input small-input", maxlength: 3, placeholder: "AB", autocapitalize: "characters", "aria-label": "Quiz section", value: c.quiz_section || "" });
+    const num = h("span", { class: "class-num" });
+    const row = {
+      picker, section, quiz, num,
+      el: h("div", { class: "class-row" },
+        h("div", { class: "class-row-head" }, num,
+          h("button", { type: "button", class: "link muted", onclick: () => removeRow(row) }, "Remove")),
+        picker.box, picker.picked,
+        h("div", { class: "section-row" },
+          h("label", {}, h("span", {}, "Section"), section),
+          h("label", {}, h("span", {}, "Quiz section"), quiz))),
+    };
+    rows.push(row);
+    rowsBox.append(row.el);
+    renumber();
+    return row;
+  }
+  function removeRow(row) {
+    if (rows.length === 1) {
+      row.picker.input.value = row.section.value = row.quiz.value = "";
+      row.picker.picked.textContent = "";
+      return;
+    }
+    rows.splice(rows.indexOf(row), 1);
+    row.el.remove();
+    renumber();
+  }
+  function fill(classes) {
+    rows.length = 0;
+    rowsBox.replaceChildren();
+    for (const c of classes) addRow(c);
+    while (rows.length < 4) addRow();
+  }
+
+  // Existing schedule for this name + quarter? Then it's an update and needs the PIN.
+  const cleanName = () => nameInput.value.trim().replace(/\s+/g, " ");
+  let existing = null;
+  let filledFor = null;
+  function updateMode() {
+    intro.replaceChildren("Add your ", h("strong", {}, "registered"), ` classes for ${quarter}. Brothers can see who's in their classes before the quarter starts.`);
+    existing = schedules.find((s) => s.full_name.toLowerCase() === cleanName().toLowerCase()) || null;
+    if (existing) {
+      notice.textContent = `You already added ${quarter} classes as ${existing.full_name}. Make your changes and enter your PIN to save them.`;
+      notice.hidden = false;
+      pinLabel.textContent = "Your PIN";
+      pinHint.textContent = "The 4-digit PIN you chose when you first added your classes.";
+      pin2Field.hidden = true;
+      pin2Input.required = false;
+      if (filledFor !== existing.id) { fill(existing.classes); filledFor = existing.id; }
+    } else {
+      notice.hidden = true;
+      pinLabel.textContent = "Choose a 4-digit PIN";
+      pinHint.textContent = "You'll need it to edit or delete your classes later, from any device.";
+      pin2Field.hidden = false;
+      pin2Input.required = true;
+      if (filledFor !== null) { fill([]); filledFor = null; }
+    }
+  }
+  nameInput.addEventListener("change", updateMode);
+  nameInput.addEventListener("blur", updateMode);
+  quarterSelect.addEventListener("change", async () => {
+    quarter = quarterSelect.value;
+    schedules = await loadQuarter(quarter);
+    filledFor = null;
+    fill([]);
+    updateMode();
+  });
+
+  const status = h("p", { class: "error", hidden: true });
+  const submit = h("button", { class: "btn gold block big", type: "submit" }, "Save my classes");
+  const form = h("form", { class: "review-form wrap" },
+    h("div", { class: "form-top" },
+      h("a", { href: `#/wbt?quarter=${enc(quarter)}`, class: "round-btn", "aria-label": "Close" }, icon("close")),
+      h("span", { class: "row-sub" }, "Visible to brothers")),
+    h("div", { class: "form-intro" }, h("h1", {}, "What's Bro Taking?"), intro),
+    h("div", { class: "q" },
+      field("Quarter", "wbt-quarter", quarterSelect),
+      field("Full name", "wbt-name", nameInput),
+      h("p", { class: "hint" }, "Your name and classes are visible to every brother who signs in."),
+      notice),
+    h("fieldset", { class: "q" }, h("legend", {}, "Your classes"),
+      h("p", { class: "hint" }, "Include your registered section and quiz section if you have one (e.g. ACCTG 215, section A, quiz section AB)."),
+      rowsBox,
+      h("button", { type: "button", class: "btn add-row", onclick: () => addRow().picker.input.focus() }, icon("plus"), "Add another class")),
+    h("div", { class: "q" },
+      h("div", { class: "field" }, pinLabel, pinHint, pinInput),
+      pin2Field),
+    status,
+    submit);
+
+  function showStatus(text) {
+    status.textContent = text;
+    status.hidden = false;
+    status.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    status.hidden = true;
+    updateMode();
+    const name = cleanName();
+    if (name.split(" ").length < 2) return showStatus("Please enter your full name (first and last).");
+
+    const entries = rows
+      .map((r) => ({ raw: r.picker.input.value.trim(), code: r.picker.code(), section: r.section.value.trim().toUpperCase(), quiz: r.quiz.value.trim().toUpperCase() }))
+      .filter((x) => x.raw);
+    if (entries.length === 0) return showStatus("Add at least one class.");
+    if (entries.some((x) => (x.section && !/^[A-Z0-9]{1,3}$/.test(x.section)) || (x.quiz && !/^[A-Z0-9]{1,3}$/.test(x.quiz)))) {
+      return showStatus("Sections are letters or numbers only, like A or AB.");
+    }
+    const unknown = entries.filter((x) => !x.code).map((x) => normalizeCourse(x.raw));
+    if (unknown.length && catalog.list.length
+      && !confirm(`${unknown.join(", ")} ${unknown.length === 1 ? "isn't" : "aren't"} in the UW course catalog. Save anyway? (Tap Cancel to fix it.)`)) return;
+
+    const pin = pinInput.value.trim();
+    if (!/^\d{4}$/.test(pin)) return showStatus("Your PIN must be 4 digits.");
+    if (!existing && pin !== pin2Input.value.trim()) return showStatus("The two PINs don't match.");
+
+    submit.disabled = true;
+    try {
+      const result = await call("save_schedule", {
+        p_quarter: quarter, p_full_name: name, p_pin: pin,
+        p_classes: entries.map((x) => ({ course: x.code || normalizeCourse(x.raw), section: x.section || null, quiz: x.quiz || null })),
+      });
+      if (!result.ok) {
+        submit.disabled = false;
+        return showStatus(result.error === "Wrong PIN" ? `Wrong PIN for ${name}'s ${quarter} classes.` : result.error);
+      }
+      try { localStorage.setItem(WBT_NAME, name); } catch { /* storage unavailable */ }
+      location.hash = `#/wbt/brother/${result.id}`;
+    } catch (err) {
+      showStatus("Couldn't save: " + err.message);
+      submit.disabled = false;
+    }
+  });
+
+  fill([]);
+  updateMode();
+  view.replaceChildren(form);
 }
 
 // ---------- Setup & login ----------
@@ -339,7 +879,7 @@ async function renderHome(view) {
   const hero = h("header", { class: "hero" },
     h("div", { class: "wrap" },
       h("div", { class: "hero-top" },
-        h("a", { href: "#/", class: "wordmark small" }, "RateMy", h("span", {}, "Bro"), "fessor"),
+        h("a", { href: "#/rate", class: "wordmark small" }, "RateMy", h("span", {}, "Bro"), "fessor"),
         h("span", { class: "crest" }, "ΔΣΠ")),
       h("h1", {}, "What are you taking next quarter?"),
       searchForm));
@@ -520,7 +1060,7 @@ async function renderSearch(view, initialQuery, dept) {
 
   view.replaceChildren(
     pageHeader(dept || "Search", {
-      back: dept ? "#/" : null,
+      back: dept ? "#/rate" : null,
       extra: h("div", { class: "header-search" }, icon("search"), h("label", { for: "search", class: "sr-only" }, "Search"), search),
     }),
     h("main", { class: "wrap page" }, sortPills, list));
@@ -598,7 +1138,8 @@ async function renderClasses(view) {
 }
 
 async function renderClass(view, code) {
-  const [{ reviews, byId }, catalog] = await Promise.all([loadAll(), loadCatalog()]);
+  const [{ reviews, byId }, catalog, current] = await Promise.all([loadAll(), loadCatalog(), loadCurrentQuarter()]);
+  const takingNow = (await loadQuarter(current)).filter((s) => s.classes.some((c) => c.course_code === code)).length;
   const title = courseTitle(catalog, code);
   const dept = catalog.departments[coursePrefix(code)];
   const forClass = reviews.filter((r) => r.course_code === code);
@@ -622,6 +1163,12 @@ async function renderClass(view, code) {
         h("p", { class: "on-purple-muted" }, [dept, plural(rows.length, "professor"), plural(forClass.length, "review")].filter(Boolean).join(" · "))),
     }),
     h("main", { class: "wrap page" },
+      h("a", { href: `#/wbt/class/${encodeURIComponent(code)}?quarter=${encodeURIComponent(current)}`, class: "crosslink" },
+        icon("people"),
+        h("span", { class: "grow" }, takingNow
+          ? [h("b", {}, `${plural(takingNow, "brother")} ${takingNow === 1 ? "is" : "are"} taking this`), ` in ${current}`]
+          : [h("b", {}, "WhatsBroTaking"), `: see who's taking ${code} in ${current}`]),
+        "›"),
       h("a", { href: `#/review/new?course=${encodeURIComponent(code)}`, class: "btn gold block" }, `Review a ${code} professor`),
       h("div", { class: "list" },
         rows.length
@@ -643,7 +1190,7 @@ async function renderProfessor(view, id) {
     loadCatalog(),
   ]);
   if (!prof) {
-    view.replaceChildren(pageHeader("Not found", { back: "#/" }), h("main", { class: "wrap page" }, h("p", {}, "Professor not found.")));
+    view.replaceChildren(pageHeader("Not found", { back: "#/rate" }), h("main", { class: "wrap page" }, h("p", {}, "Professor not found.")));
     return;
   }
 
@@ -673,7 +1220,7 @@ async function renderProfessor(view, id) {
   view.replaceChildren(
     h("header", { class: "prof-hero" },
       h("div", { class: "wrap" },
-        h("a", { href: "#/", class: "round-btn on-purple", "aria-label": "Back" }, icon("back")),
+        h("a", { href: "#/rate", class: "round-btn on-purple", "aria-label": "Back" }, icon("back")),
         h("div", { class: "prof-id" },
           h("span", { class: "prof-avatar" }, initials(prof.name)),
           h("div", {},
@@ -771,7 +1318,7 @@ async function renderForm(view, { professorId = null, reviewId = null, course: p
   if (reviewId) {
     existing = await q(supabase.from("reviews").select(REVIEW_COLUMNS).eq("id", reviewId).maybeSingle());
     if (!existing || !tokens[reviewId]) {
-      view.replaceChildren(pageHeader("Edit review", { back: "#/" }),
+      view.replaceChildren(pageHeader("Edit review", { back: "#/rate" }),
         h("main", { class: "wrap page" }, h("p", {}, "You can only edit reviews posted from this device.")));
       return;
     }
@@ -802,43 +1349,11 @@ async function renderForm(view, { professorId = null, reviewId = null, course: p
   });
 
   // Class box: type a code or a word, pick from matching UW courses.
-  const courseInput = h("input", {
-    id: "course", class: "input", required: true, maxlength: 20, placeholder: "e.g. FIN 350", autocapitalize: "characters",
-    autocomplete: "off", role: "combobox", "aria-autocomplete": "list", "aria-controls": "course-suggestions", "aria-expanded": "false",
-    value: existing?.course_code || presetCourse,
+  const coursePicker = makeCoursePicker(catalog, {
+    id: "course", value: existing?.course_code || presetCourse, required: true,
+    onPick: (code) => { if (!newDept.value) newDept.value = catalog.departments[coursePrefix(code)] || ""; },
   });
-  const suggestions = h("div", { class: "suggestions", id: "course-suggestions", role: "listbox", hidden: true });
-  const coursePicked = h("p", { class: "course-picked" });
-  function updateCoursePicked() {
-    const code = catalog.byKey.get(compact(courseInput.value));
-    coursePicked.textContent = code ? `${code} · ${courseTitle(catalog, code)}` : "";
-    return code;
-  }
-  function pickCourse(code) {
-    courseInput.value = code;
-    hideSuggestions();
-    updateCoursePicked();
-    if (!newDept.value) newDept.value = catalog.departments[coursePrefix(code)] || "";
-  }
-  function hideSuggestions() {
-    suggestions.hidden = true;
-    courseInput.setAttribute("aria-expanded", "false");
-  }
-  courseInput.addEventListener("input", () => {
-    const exact = updateCoursePicked();
-    const matches = findCourses(catalog, courseInput.value, 6);
-    if (matches.length === 0 || (exact && matches.length === 1)) return hideSuggestions();
-    suggestions.replaceChildren(...matches.map((c) => h("button", {
-      type: "button", class: "suggestion", role: "option",
-      onmousedown: (e) => e.preventDefault(), // keep focus so the click lands
-      onclick: () => pickCourse(c.code),
-    }, h("b", {}, c.code), h("span", {}, c.title))));
-    suggestions.hidden = false;
-    courseInput.setAttribute("aria-expanded", "true");
-  });
-  courseInput.addEventListener("blur", () => setTimeout(hideSuggestions, 150));
-  courseInput.addEventListener("keydown", (e) => { if (e.key === "Escape") hideSuggestions(); });
-  updateCoursePicked();
+  const courseInput = coursePicker.input;
 
   const now = new Date();
   const [existingTerm, existingYear] = existing ? existing.semester.split(" ") : [];
@@ -870,7 +1385,7 @@ async function renderForm(view, { professorId = null, reviewId = null, course: p
 
   const status = h("p", { class: "error", hidden: true });
   const submit = h("button", { class: "btn gold block big", type: "submit" }, existing ? "Save changes" : "Post review");
-  const backHref = existing ? `#/prof/${professorId}` : professorId ? `#/prof/${professorId}` : "#/";
+  const backHref = existing ? `#/prof/${professorId}` : professorId ? `#/prof/${professorId}` : "#/rate";
 
   const form = h("form", { class: "review-form wrap" },
     h("div", { class: "form-top" },
@@ -880,8 +1395,8 @@ async function renderForm(view, { professorId = null, reviewId = null, course: p
       h("h1", {}, existing ? "Edit your review" : "Rate a professor"),
       h("p", { class: "row-sub" }, "The good, the bad, and the ugly. All reviews and responses are anonymous. Keep it about the class and the teaching.")),
     h("div", { class: "q" },
-      field("Class", "course", h("div", { class: "combo" }, courseInput, suggestions), "Type the course code or name. UW Seattle courses only."),
-      coursePicked,
+      field("Class", "course", coursePicker.box, "Type the course code or name. UW Seattle courses only."),
+      coursePicker.picked,
       field("Professor", "prof", profSelect),
       newProfBox,
       h("fieldset", { class: "field" }, h("legend", {}, "Quarter taken"), h("div", { class: "term-row" }, termPicker, year))),
@@ -991,10 +1506,12 @@ async function renderAdmin(view) {
     view.replaceChildren(pageHeader("Admin", { back: "#/" }), h("main", { class: "wrap page" }, h("p", {}, "Admins only.")));
     return;
   }
-  const [flagged, profs] = await Promise.all([
+  const [flagged, profs, current] = await Promise.all([
     call("admin_flagged_reviews"),
     q(supabase.from("professor_stats").select("id, name, department, review_count").order("name")),
+    loadCurrentQuarter(),
   ]);
+  const [schedules, quarters] = await Promise.all([loadQuarter(current), loadQuarterList(current)]);
 
   const flaggedList = flagged.length
     ? flagged.map((r) => h("article", { class: "panel" },
@@ -1033,8 +1550,9 @@ async function renderAdmin(view) {
       }, "Delete"))));
 
   view.replaceChildren(
-    pageHeader("Admin", { subtitle: "Signed in with the admin password." }),
+    pageHeader("Admin", { back: "#/", subtitle: "Signed in with the admin password." }),
     h("main", { class: "wrap page" },
+      wbtAdmin(current, schedules, quarters),
       h("section", {}, h("div", { class: "section-head" }, h("h2", {}, `Reported reviews (${flagged.length})`)), flaggedList),
       h("section", {}, h("div", { class: "section-head" }, h("h2", {}, `Professors (${profs.length})`)),
         profRows.length ? h("div", { class: "panel" }, profRows) : h("p", { class: "muted" }, "No professors yet.")),
@@ -1043,6 +1561,67 @@ async function renderAdmin(view) {
           "The password brothers use. Everyone gets signed out within the hour and needs the new one."),
         passwordForm("admin", "Admin password", "The password officers use for this Admin page.")),
       h("p", { class: "signout-line" }, h("button", { type: "button", class: "link muted", onclick: signOut }, "Sign out of this device"))));
+}
+
+// WhatsBroTaking tools: current quarter, fix schedules, clear old quarters.
+function wbtAdmin(current, schedules, quarters) {
+  const [curTerm, curYear] = current.split(" ");
+  const thisYear = new Date().getFullYear();
+  const term = h("select", { class: "input", "aria-label": "Quarter", value: curTerm }, TERMS.map((t) => h("option", { value: t }, t)));
+  const years = [...new Set([thisYear - 1, thisYear, thisYear + 1, Number(curYear)])].sort();
+  const year = h("select", { class: "input", "aria-label": "Year", value: curYear }, years.map((y) => h("option", { value: String(y) }, y)));
+  const setQuarter = h("form", { class: "panel" },
+    h("h3", {}, "Current quarter"),
+    h("p", { class: "row-sub" }, "WhatsBroTaking shows and collects this quarter by default. Set it to the upcoming quarter once registration opens."),
+    h("div", { class: "inline-fields" }, term, year, h("button", { type: "submit", class: "btn purple small" }, "Save")));
+  setQuarter.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (await act("admin_set_current_quarter", { p_quarter: `${term.value} ${year.value}` })) render();
+  });
+
+  const rows = schedules.map((s) => h("div", { class: "admin-row" },
+    h("div", {}, h("strong", {}, s.full_name), h("div", { class: "row-sub" }, classesWord(s.classes.length))),
+    h("div", { class: "review-actions" },
+      h("button", {
+        type: "button", class: "link",
+        onclick: async () => {
+          const pin = prompt(`New 4-digit PIN for ${s.full_name}:`);
+          if (pin === null) return;
+          if (await act("admin_reset_schedule_pin", { p_id: s.id, p_pin: pin.trim() })) alert(`PIN reset. Tell ${s.full_name} the new PIN.`);
+        },
+      }, "Reset PIN"),
+      h("button", {
+        type: "button", class: "link danger-text",
+        onclick: async () => {
+          if (confirm(`Delete ${s.full_name}'s ${current} classes?`) && await act("admin_delete_schedule", { p_id: s.id })) render();
+        },
+      }, "Delete"))));
+
+  const old = quarters.filter((qtr) => qtr !== current);
+  const clearSelect = h("select", { class: "input", "aria-label": "Quarter to clear" }, old.map((qtr) => h("option", { value: qtr }, qtr)));
+  const clear = h("form", { class: "panel" },
+    h("h3", {}, "Clear an old quarter"),
+    h("p", { class: "row-sub" }, "Deletes every schedule for that quarter. This can't be undone."),
+    h("div", { class: "inline-fields" }, clearSelect, h("button", { type: "submit", class: "btn danger small" }, "Clear")));
+  clear.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!confirm(`Delete ALL WhatsBroTaking schedules for ${clearSelect.value}?`)) return;
+    try {
+      const n = await call("admin_clear_quarter", { p_quarter: clearSelect.value });
+      alert(`Deleted ${plural(n, "schedule")}.`);
+      render();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+
+  return h("section", {},
+    h("div", { class: "section-head" }, h("h2", {}, "WhatsBroTaking")),
+    setQuarter,
+    h("div", { class: "panel" },
+      h("h3", {}, `${current} schedules (${schedules.length})`),
+      rows.length ? rows : h("p", { class: "row-sub" }, "No one has added classes yet.")),
+    old.length > 0 && clear);
 }
 
 function passwordForm(which, title, description) {
