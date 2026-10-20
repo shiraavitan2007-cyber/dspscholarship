@@ -371,7 +371,7 @@ function bottomNav(app, active) {
   const apps = item("apps", "#/", "Apps", "grid");
   if (app === "wbt") {
     return h("nav", { class: "bottom-nav", "aria-label": "What'sBroTaking" },
-      item("classes", "#/wbt", "This quarter"),
+      item("classes", "#/wbt", "Schedule"),
       item("brothers", "#/wbt/brothers", "Brothers", "people"),
       h("a", { href: "#/wbt/add", class: "nav-plus", "aria-label": "Add my classes" }, icon("plus")),
       item("profile", "#/wbt/profile", "Profile", "person"),
