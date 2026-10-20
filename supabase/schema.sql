@@ -447,6 +447,9 @@ begin
   end if;
 
   for c in select * from jsonb_array_elements(p_classes) loop
+    if trim(coalesce(c ->> 'section', '')) = '' then
+      raise exception 'Every class needs a section (e.g. A)';
+    end if;
     insert into schedule_classes (schedule_id, course_code, section, quiz_section)
     values (v_id, normalize_course(c ->> 'course'),
             nullif(upper(trim(coalesce(c ->> 'section', ''))), ''),

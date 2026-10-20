@@ -674,7 +674,7 @@ async function renderWbtForm(view, requested, presetName) {
   }
   function addRow(c = {}) {
     const picker = makeCoursePicker(catalog, { value: c.course_code || "" });
-    const section = h("input", { class: "input small-input", maxlength: 3, placeholder: "A", autocapitalize: "characters", "aria-label": "Section", value: c.section || "" });
+    const section = h("input", { class: "input small-input", maxlength: 3, placeholder: "A", autocapitalize: "characters", "aria-label": "Section (required)", value: c.section || "" });
     const quiz = h("input", { class: "input small-input", maxlength: 3, placeholder: "AB", autocapitalize: "characters", "aria-label": "Quiz section", value: c.quiz_section || "" });
     const num = h("span", { class: "class-num" });
     const row = {
@@ -684,8 +684,8 @@ async function renderWbtForm(view, requested, presetName) {
           h("button", { type: "button", class: "link muted", onclick: () => removeRow(row) }, "Remove")),
         picker.box, picker.picked,
         h("div", { class: "section-row" },
-          h("label", {}, h("span", {}, "Section"), section),
-          h("label", {}, h("span", {}, "Quiz section"), quiz))),
+          h("label", {}, h("span", {}, "Section ", h("b", { class: "req" }, "*")), section),
+          h("label", {}, h("span", {}, "Quiz section (optional)"), quiz))),
     };
     rows.push(row);
     rowsBox.append(row.el);
@@ -756,7 +756,7 @@ async function renderWbtForm(view, requested, presetName) {
       h("p", { class: "hint" }, "Your name and classes are visible to every brother who signs in."),
       notice),
     h("fieldset", { class: "q" }, h("legend", {}, "Your classes"),
-      h("p", { class: "hint" }, "Include your registered section and quiz section if you have one (e.g. ACCTG 215, section A, quiz section AB)."),
+      h("p", { class: "hint" }, "Include your registered section, plus your quiz section if you have one (e.g. ACCTG 215, section A, quiz section AB)."),
       rowsBox,
       h("button", { type: "button", class: "btn add-row", onclick: () => addRow().picker.input.focus() }, icon("plus"), "Add another class")),
     h("div", { class: "q" },
@@ -782,6 +782,11 @@ async function renderWbtForm(view, requested, presetName) {
       .map((r) => ({ raw: r.picker.input.value.trim(), code: r.picker.code(), section: r.section.value.trim().toUpperCase(), quiz: r.quiz.value.trim().toUpperCase() }))
       .filter((x) => x.raw);
     if (entries.length === 0) return showStatus("Add at least one class.");
+    const missing = entries.find((x) => !x.section);
+    if (missing) {
+      rows.find((r) => r.picker.input.value.trim() === missing.raw)?.section.focus();
+      return showStatus(`Add your section for ${missing.code || normalizeCourse(missing.raw)} (e.g. A).`);
+    }
     if (entries.some((x) => (x.section && !/^[A-Z0-9]{1,3}$/.test(x.section)) || (x.quiz && !/^[A-Z0-9]{1,3}$/.test(x.quiz)))) {
       return showStatus("Sections are letters or numbers only, like A or AB.");
     }

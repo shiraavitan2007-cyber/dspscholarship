@@ -410,6 +410,7 @@ a.pill { display: inline-flex; align-items: center; text-decoration: none; }
 .section-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .section-row label { display: flex; flex-direction: column; gap: 4px; font-size: 0.75rem; font-weight: 700; color: var(--muted); }
 .small-input { padding: 10px 12px; text-transform: uppercase; }
+.req { color: var(--bad); }
 .btn.add-row { background: var(--bg); color: var(--purple); border: 2px dashed var(--line); width: 100%; }
 .input.pin { max-width: 160px; letter-spacing: 0.4em; font-size: 20px; text-align: center; }
 .inline-fields { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
