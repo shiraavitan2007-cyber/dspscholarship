@@ -400,35 +400,23 @@ function signOut() {
 
 // ---------- Hub (home after sign-in) ----------
 
+// Two big app tiles, like a phone home screen.
 async function renderHub(view) {
-  const [reviews, current] = await Promise.all([q(supabase.from("reviews").select("id")), loadCurrentQuarter()]);
-  const schedules = await q(supabase.from("schedules").select("id").eq("quarter", current));
-  const brothers = schedules.length;
-
-  view.replaceChildren(
-    h("header", { class: "hero hub-hero" },
-      h("div", { class: "wrap" },
-        h("div", { class: "hero-top" },
-          h("span", { class: "hub-eyebrow" }, "Delta Sigma Pi · Scholarship"),
-          h("span", { class: "crest" }, "ΔΣΠ")),
-        h("h1", {}, "Hey brother. What do you need?"))),
-    h("main", { class: "wrap hub" },
-      h("a", { href: "#/rate", class: "app-card" },
-        h("span", { class: "app-icon gold" }, icon("star")),
-        h("span", { class: "app-text" },
-          h("span", { class: "app-name" }, "RateMy", h("span", {}, "Bro"), "fessor"),
-          h("span", { class: "app-desc" }, "Rate and read reviews of UW professors"),
-          h("span", { class: "app-teaser" }, reviews.length ? `${plural(reviews.length, "review")} from brothers` : "Be the first to write a review"))),
-      h("a", { href: "#/wbt", class: "app-card purple" },
-        h("span", { class: "app-icon" }, icon("people")),
-        h("span", { class: "app-text" },
-          h("span", { class: "app-name" }, "Whats", h("span", {}, "Bro"), "Taking"),
-          h("span", { class: "app-desc" }, "See what classes brothers are taking"),
-          h("span", { class: "app-teaser" }, brothers
-            ? `${plural(brothers, "brother")} ${brothers === 1 ? "has" : "have"} added ${current} classes`
-            : `Add your ${current} classes`))),
-      isAdmin() && h("a", { href: "#/admin", class: "admin-link" }, icon("admin"), "Admin tools"),
-      h("p", { class: "signout-line" }, h("button", { type: "button", class: "link muted", onclick: signOut }, "Sign out of this device"))));
+  view.replaceChildren(h("main", { class: "hub" },
+    h("div", { class: "hub-top" },
+      h("span", { class: "crest" }, "ΔΣΠ"),
+      h("span", { class: "hub-eyebrow" }, "Scholarship")),
+    h("div", { class: "tiles" },
+      h("a", { href: "#/rate", class: "tile gold" },
+        h("span", { class: "tile-icon" }, icon("star")),
+        h("span", { class: "tile-name" }, "RateMy", h("br"), h("span", {}, "Bro"), "fessor")),
+      h("a", { href: "#/wbt", class: "tile purple" },
+        h("span", { class: "tile-icon" }, icon("people")),
+        h("span", { class: "tile-name" }, "Whats", h("br"), h("span", {}, "Bro"), "Taking"))),
+    h("p", { class: "hub-links" },
+      isAdmin() && h("a", { href: "#/admin" }, "Admin"),
+      isAdmin() && h("span", { "aria-hidden": "true" }, "·"),
+      h("button", { type: "button", class: "link muted", onclick: signOut }, "Sign out"))));
 }
 
 // ---------- WhatsBroTaking ----------

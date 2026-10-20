@@ -355,33 +355,31 @@ select.input:disabled { cursor: default; opacity: 0.7; }
 }
 
 /* ---------- Hub ---------- */
-body.no-nav { padding-bottom: 32px; }
-.hub-hero h1 { margin-bottom: 4px; }
-.hub-eyebrow { font-size: 0.8rem; font-weight: 700; color: var(--on-purple-muted); }
-.hub { display: flex; flex-direction: column; gap: 14px; padding-top: 22px; }
-.app-card {
-  display: flex; gap: 16px; align-items: center; padding: 20px; border-radius: 24px;
-  background: var(--surface); color: var(--ink); text-decoration: none; border: 2px solid transparent;
+body.no-nav { padding-bottom: 0; }
+.hub {
+  min-height: 100vh; min-height: 100dvh; max-width: 560px; margin: 0 auto; padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; justify-content: center; gap: 28px;
 }
-.app-card:hover { border-color: var(--gold); }
-.app-card.purple { background: var(--purple); color: #fff; }
-.app-icon {
-  flex: none; width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center;
-  background: var(--gold); color: var(--purple);
+.hub-top { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.hub-eyebrow { font-size: 0.95rem; font-weight: 800; color: var(--purple); letter-spacing: 0.02em; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.tile {
+  aspect-ratio: 1 / 1.15; border-radius: 30px; padding: 20px 18px; text-decoration: none;
+  display: flex; flex-direction: column; justify-content: space-between;
+  box-shadow: 0 10px 28px rgba(51, 0, 102, 0.18); transition: transform 0.15s ease;
 }
-.app-icon .icon { width: 30px; height: 30px; }
-.app-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.app-name { font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; }
-.app-name span { color: var(--purple); }
-.app-card.purple .app-name span { color: var(--gold); }
-.app-desc { font-size: 0.88rem; color: var(--muted); }
-.app-card.purple .app-desc { color: var(--on-purple-muted); }
-.app-teaser { margin-top: 6px; font-size: 0.78rem; font-weight: 800; color: var(--purple); }
-.app-card.purple .app-teaser { color: var(--gold); }
-.admin-link {
-  display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-radius: 18px;
-  background: var(--surface); color: var(--purple); font-weight: 800; text-decoration: none;
-}
+.tile:hover, .tile:focus-visible { transform: translateY(-3px); }
+.tile:active { transform: scale(0.98); }
+.tile.gold { background: var(--gold); color: var(--purple); }
+.tile.purple { background: var(--purple); color: #fff; }
+.tile-icon .icon { width: 44px; height: 44px; }
+.tile.purple .tile-icon { color: var(--gold); }
+.tile-name { font-size: clamp(1.25rem, 6vw, 1.7rem); font-weight: 800; line-height: 1.05; letter-spacing: -0.03em; }
+.tile.gold .tile-name { color: var(--ink); }
+.tile.gold .tile-name span { color: var(--purple); }
+.tile.purple .tile-name span { color: var(--gold); }
+.hub-links { display: flex; justify-content: center; align-items: center; gap: 10px; margin: 0; font-size: 0.85rem; font-weight: 700; color: var(--muted); }
+.hub-links a { color: var(--purple); text-decoration: none; }
 
 /* ---------- WhatsBroTaking ---------- */
 a.pill { display: inline-flex; align-items: center; text-decoration: none; }
