@@ -37,6 +37,15 @@ Members can tap **Report** on any review. Sign in with the admin password → **
 - **Keep** clears the report; **Delete** removes the review.
 - Under **Professors** you can fix a name or department, or delete a duplicate professor (this deletes their reviews too).
 
+## UW classes
+The class picker, course titles, and Classes search use `uw-courses.json`, a list of every
+UW Seattle course built from the official catalog (https://www.washington.edu/students/crscat/).
+Quarters are UW's: Autumn, Winter, Spring, Summer. To pick up new courses (about once a year):
+```bash
+python3 tools/build_uw_courses.py
+git add uw-courses.json && git commit -m "Update UW course list" && git push
+```
+
 ## Change tags or colors
 - Tags: edit `TAGS` in `app.js` **and** `allowed_tags()` in `supabase/schema.sql`, then re-run the SQL in Supabase.
 - Colors: edit the variables at the top of `style.css`.

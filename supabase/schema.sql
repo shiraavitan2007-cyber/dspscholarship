@@ -52,7 +52,7 @@ create table if not exists public.reviews (
   id bigint generated always as identity primary key,
   professor_id bigint not null references public.professors (id) on delete cascade,
   course_code text not null check (char_length(course_code) between 2 and 20),
-  semester text not null check (semester ~ '^(Spring|Summer|Fall|Winter) [0-9]{4}$'),
+  semester text not null,
   overall smallint not null check (overall between 1 and 5),
   difficulty smallint not null check (difficulty between 1 and 5),
   take_again boolean not null,
@@ -81,6 +81,11 @@ alter table public.reviews drop constraint if exists reviews_tags_check;
 alter table public.reviews add constraint reviews_tags_check check (cardinality(tags) <= 25);
 alter table public.reviews drop constraint if exists reviews_body_check;
 alter table public.reviews add constraint reviews_body_check check (char_length(body) between 10 and 3000);
+-- UW quarters: Autumn, Winter, Spring, Summer.
+update public.reviews set semester = replace(semester, 'Fall ', 'Autumn ') where semester like 'Fall %';
+alter table public.reviews drop constraint if exists reviews_semester_check;
+alter table public.reviews add constraint reviews_semester_check
+  check (semester ~ '^(Autumn|Winter|Spring|Summer) [0-9]{4}$');
 alter table public.reviews drop constraint if exists reviews_other_tag_check;
 alter table public.reviews add constraint reviews_other_tag_check check (char_length(other_tag) between 1 and 40);
 

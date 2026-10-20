@@ -16,7 +16,8 @@ const GRADES = [
   ["C+", "C+"], ["C", "C"], ["C-", "C-"], ["D+", "D+"], ["D", "D"], ["D-", "D-"], ["F", "F"],
   ["S", "S (satisfactory)"], ["NS", "NS (not satisfactory)"], ["Dropped", "Dropped the class"],
 ];
-const TERMS = ["Fall", "Winter", "Spring", "Summer"];
+// UW quarters. Must match reviews_semester_check in supabase/schema.sql
+const TERMS = ["Autumn", "Winter", "Spring", "Summer"];
 const OVERALL_LABELS = ["", "Awful", "Poor", "OK", "Good", "Awesome"];
 const DIFFICULTY_LABELS = ["", "Very easy", "Easy", "Average", "Hard", "Very hard"];
 const REVIEW_COLUMNS = "id, professor_id, course_code, semester, overall, difficulty, take_again, "
@@ -88,6 +89,48 @@ function forgetReview(id) {
 
 function normalizeCourse(c) {
   return c.trim().replace(/\s+/g, " ").toUpperCase().replace(/^([A-Z]+)\s*-?\s*(\d)/, "$1 $2");
+}
+// "b econ 300", "BECON300" and "B ECON 300" all compact to "BECON300".
+function compact(text) {
+  return text.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+// "B ECON 300" -> "B ECON"
+function coursePrefix(code) {
+  return code.replace(/\s*\d.*$/, "");
+}
+
+// UW Seattle course catalog (uw-courses.json, built by tools/build_uw_courses.py).
+// Loaded once, on the pages that need it; the site still works if it fails to load.
+let catalogPromise = null;
+function loadCatalog() {
+  catalogPromise ||= fetch("uw-courses.json")
+    .then((res) => (res.ok ? res.json() : { courses: [], departments: {} }))
+    .catch(() => ({ courses: [], departments: {} }))
+    .then((data) => ({
+      list: data.courses.map(([code, title]) => ({
+        code, title, key: compact(code), number: Number(code.match(/\d+/)?.[0] || 0),
+        search: `${compact(code)} ${title} ${data.departments[coursePrefix(code)] || ""}`.toLowerCase(),
+      })),
+      titles: new Map(data.courses),
+      byKey: new Map(data.courses.map(([code]) => [compact(code), code])),
+      departments: data.departments,
+    }));
+  return catalogPromise;
+}
+function courseTitle(catalog, code) {
+  return catalog.titles.get(code) || "";
+}
+// Best catalog matches for what someone typed: code matches first, then title/department
+// matches with lower-numbered (undergraduate) courses first.
+function findCourses(catalog, text, limit = 8) {
+  const key = compact(text);
+  const words = text.toLowerCase().trim().replace(/\s+/g, " ");
+  if (!key) return [];
+  const byCode = catalog.list.filter((c) => c.key.startsWith(key));
+  const byTitle = words.length >= 3
+    ? catalog.list.filter((c) => !c.key.startsWith(key) && c.search.includes(words)).sort((a, b) => a.number - b.number)
+    : [];
+  return [...byCode, ...byTitle].slice(0, limit);
 }
 
 function isAdmin() {
@@ -271,7 +314,7 @@ function renderLogin() {
 // ---------- Home ----------
 
 async function renderHome(view) {
-  const { profs, reviews, byId } = await loadAll();
+  const [{ profs, reviews, byId }, catalog] = await Promise.all([loadAll(), loadCatalog()]);
   const reviewed = profs.filter((p) => p.review_count > 0);
 
   const search = h("input", { id: "home-search", type: "search", placeholder: "Class or professor", enterkeyhint: "search" });
@@ -305,9 +348,9 @@ async function renderHome(view) {
     if (!p.department) continue;
     deptCounts[p.department] = (deptCounts[p.department] || 0) + p.review_count;
     const counts = (prefixCounts[p.department] ||= {});
-    for (const c of p.courses) counts[c.split(" ")[0]] = (counts[c.split(" ")[0]] || 0) + 1;
+    for (const c of p.courses) counts[coursePrefix(c)] = (counts[coursePrefix(c)] || 0) + 1;
   }
-  const deptLabel = (d) => Object.entries(prefixCounts[d] || {}).sort((a, b) => b[1] - a[1])[0]?.[0].slice(0, 5)
+  const deptLabel = (d) => Object.entries(prefixCounts[d] || {}).sort((a, b) => b[1] - a[1])[0]?.[0].slice(0, 6)
     || d.replace(/[^A-Za-z]/g, "").slice(0, 4).toUpperCase();
   const depts = Object.entries(deptCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([d]) => d);
   const bubbles = depts.length > 0 && h("div", { class: "bubbles wrap" },
@@ -383,7 +426,7 @@ async function renderHome(view) {
         chartList),
       classes.length > 0 && h("section", {},
         h("div", { class: "section-head" }, h("h2", {}, "Popular classes"), h("a", { href: "#/classes" }, "All classes")),
-        h("div", { class: "class-grid" }, classes.map(classTile))),
+        h("div", { class: "class-grid" }, classes.map((c) => classTile(c, catalog)))),
       h("section", {},
         h("div", { class: "section-head" }, h("h2", {}, "Fresh from the chapter")),
         feed),
@@ -426,9 +469,11 @@ function summarizeClasses(reviews) {
   return [...map.values()].map((c) => ({ ...c, avg: c.total / c.count })).sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
 }
 
-function classTile(c) {
+function classTile(c, catalog) {
+  const title = courseTitle(catalog, c.code);
   return h("a", { href: `#/class/${encodeURIComponent(c.code)}`, class: "class-tile" },
     h("span", { class: "class-code" }, c.code),
+    title && h("span", { class: "class-title" }, title),
     h("span", { class: "row-sub" }, `${plural(c.profs.size, "professor")} · avg ${fmt(c.avg)}`));
 }
 
@@ -437,7 +482,7 @@ function classTile(c) {
 async function renderSearch(view, initialQuery, dept) {
   const { profs } = await loadAll();
 
-  const search = h("input", { id: "search", type: "search", placeholder: "Professor, department, or class", value: initialQuery, enterkeyhint: "search" });
+  const search = h("input", { id: "search", type: "search", placeholder: "Professor, department, or class (e.g. FIN 350)", value: initialQuery, enterkeyhint: "search" });
   const sortPills = h("div", { class: "pills", role: "group", "aria-label": "Sort" });
   const list = h("div", { class: "list" });
   const sorters = {
@@ -452,12 +497,12 @@ async function renderSearch(view, initialQuery, dept) {
       onclick: () => { browseState.sort = key; update(); },
     }, label)));
     const term = search.value.trim().toLowerCase();
-    const course = normalizeCourse(search.value).toLowerCase();
+    const course = compact(search.value);
     const rows = profs
       .filter((p) => !dept || p.department === dept)
       .filter((p) => !term
         || `${p.name} ${p.department}`.toLowerCase().includes(term)
-        || p.courses.some((c) => c.toLowerCase().includes(course)))
+        || (course && p.courses.some((c) => compact(c).includes(course))))
       .sort(sorters[browseState.sort][1]);
     list.replaceChildren(...(rows.length
       ? rows.map(profRow)
@@ -490,28 +535,54 @@ function profRow(p) {
 // ---------- Classes ----------
 
 async function renderClasses(view) {
-  const { reviews } = await loadAll();
+  const [{ reviews }, catalog] = await Promise.all([loadAll(), loadCatalog()]);
   const classes = summarizeClasses(reviews);
-  const search = h("input", { id: "class-search", type: "search", placeholder: "e.g. FIN 3010" });
+  const reviewedCodes = new Set(classes.map((c) => c.code));
+  const search = h("input", { id: "class-search", type: "search", placeholder: "FIN 350, marketing…" });
   const list = h("div", { class: "list" });
 
+  const reviewedRow = (c) => h("a", { href: `#/class/${encodeURIComponent(c.code)}`, class: "list-row" },
+    h("span", { class: "code-badge" }, coursePrefix(c.code)),
+    h("div", { class: "grow" },
+      h("div", { class: "row-title" }, c.code),
+      courseTitle(catalog, c.code) && h("div", { class: "row-sub strong" }, courseTitle(catalog, c.code)),
+      h("div", { class: "row-sub" }, `${plural(c.profs.size, "professor")} · ${plural(c.count, "review")}`)),
+    rateChip(c.avg));
+  const catalogRow = (c) => h("a", { href: `#/class/${encodeURIComponent(c.code)}`, class: "list-row" },
+    h("span", { class: "code-badge" }, coursePrefix(c.code)),
+    h("div", { class: "grow" },
+      h("div", { class: "row-title" }, c.code),
+      h("div", { class: "row-sub strong" }, c.title),
+      h("div", { class: "row-sub" }, "No reviews yet")),
+    rateChip(null));
+
   function update() {
-    const term = normalizeCourse(search.value).toLowerCase();
-    const rows = classes.filter((c) => c.code.toLowerCase().includes(term));
-    list.replaceChildren(...(rows.length
-      ? rows.map((c) => h("a", { href: `#/class/${encodeURIComponent(c.code)}`, class: "list-row" },
-        h("span", { class: "code-badge" }, c.code.split(" ")[0]),
-        h("div", { class: "grow" },
-          h("div", { class: "row-title" }, c.code),
-          h("div", { class: "row-sub" }, `${plural(c.profs.size, "professor")} · ${plural(c.count, "review")}`)),
-        rateChip(c.avg)))
-      : [classes.length ? h("p", { class: "muted pad" }, "No classes match.") : emptyState("No classes reviewed yet.")]));
+    const text = search.value.trim();
+    if (!text) {
+      list.replaceChildren(...(classes.length
+        ? [h("p", { class: "list-label" }, "Reviewed by the chapter"), ...classes.map(reviewedRow)]
+        : [h("p", { class: "muted pad" }, "No classes reviewed yet. Search any UW class above.")]));
+      return;
+    }
+    const key = compact(text);
+    const words = text.toLowerCase();
+    const reviewedMatches = classes.filter((c) => compact(c.code).includes(key)
+      || courseTitle(catalog, c.code).toLowerCase().includes(words));
+    const catalogMatches = findCourses(catalog, text, 30).filter((c) => !reviewedCodes.has(c.code));
+    list.replaceChildren(...(reviewedMatches.length || catalogMatches.length
+      ? [
+        reviewedMatches.length > 0 && h("p", { class: "list-label" }, "Reviewed by the chapter"),
+        ...reviewedMatches.map(reviewedRow),
+        catalogMatches.length > 0 && h("p", { class: "list-label" }, "Other UW classes"),
+        ...catalogMatches.map(catalogRow),
+      ].filter(Boolean)
+      : [h("p", { class: "muted pad" }, "No UW classes match. Try a code like FIN 350 or a word like \"marketing\".")]));
   }
   search.addEventListener("input", update);
 
   view.replaceChildren(
     pageHeader("Classes", {
-      subtitle: "Find every professor who teaches a class.",
+      subtitle: "Every UW Seattle class. See who teaches it and what brothers thought.",
       extra: h("div", { class: "header-search" }, icon("search"), h("label", { for: "class-search", class: "sr-only" }, "Search classes"), search),
     }),
     h("main", { class: "wrap page" }, list));
@@ -519,7 +590,9 @@ async function renderClasses(view) {
 }
 
 async function renderClass(view, code) {
-  const { reviews, byId } = await loadAll();
+  const [{ reviews, byId }, catalog] = await Promise.all([loadAll(), loadCatalog()]);
+  const title = courseTitle(catalog, code);
+  const dept = catalog.departments[coursePrefix(code)];
   const forClass = reviews.filter((r) => r.course_code === code);
   const groups = new Map();
   for (const r of forClass) {
@@ -534,7 +607,12 @@ async function renderClass(view, code) {
     .sort((a, b) => b.overall - a.overall || b.count - a.count);
 
   view.replaceChildren(
-    pageHeader(code, { back: "#/classes", subtitle: `${plural(rows.length, "professor")} · ${plural(forClass.length, "review")}` }),
+    pageHeader(code, {
+      back: "#/classes",
+      extra: h("div", { class: "class-header-info" },
+        title && h("p", { class: "class-header-title" }, title),
+        h("p", { class: "on-purple-muted" }, [dept, plural(rows.length, "professor"), plural(forClass.length, "review")].filter(Boolean).join(" · "))),
+    }),
     h("main", { class: "wrap page" },
       h("a", { href: `#/review/new?course=${encodeURIComponent(code)}`, class: "btn gold block" }, `Review a ${code} professor`),
       h("div", { class: "list" },
@@ -551,9 +629,10 @@ async function renderClass(view, code) {
 // ---------- Professor page ----------
 
 async function renderProfessor(view, id) {
-  const [prof, reviews] = await Promise.all([
+  const [prof, reviews, catalog] = await Promise.all([
     q(supabase.from("professor_stats").select("*").eq("id", id).maybeSingle()),
     q(supabase.from("reviews").select(REVIEW_COLUMNS).eq("professor_id", id).order("created_at", { ascending: false })),
+    loadCatalog(),
   ]);
   if (!prof) {
     view.replaceChildren(pageHeader("Not found", { back: "#/" }), h("main", { class: "wrap page" }, h("p", {}, "Professor not found.")));
@@ -578,7 +657,7 @@ async function renderProfessor(view, id) {
       h("button", { type: "button", class: "pill", "aria-pressed": String(c === course), onclick: () => { course = c; update(); } }, c)));
     const shown = reviews.filter((r) => course === courses[0] || r.course_code === course);
     list.replaceChildren(...(shown.length
-      ? shown.map((r) => reviewCard(r))
+      ? shown.map((r) => reviewCard(r, catalog))
       : [emptyState("No reviews yet. Be the first!", false)]));
   }
 
@@ -623,7 +702,7 @@ function stat(value, label) {
   return h("div", { class: "stat" }, h("strong", {}, value), h("span", {}, label));
 }
 
-function reviewCard(r) {
+function reviewCard(r, catalog) {
   const token = load(TOKENS)[r.id];
   const edited = new Date(r.updated_at) - new Date(r.created_at) > 60_000;
 
@@ -657,7 +736,10 @@ function reviewCard(r) {
       h("div", {}, h("div", { class: "box-label" }, "QUALITY"), h("div", { class: `box ${ratingClass(r.overall)}` }, `${r.overall}.0`)),
       h("div", {}, h("div", { class: "box-label" }, "DIFFICULTY"), h("div", { class: "box neutral" }, `${r.difficulty}.0`))),
     h("div", { class: "review-main" },
-      h("div", { class: "review-head" }, h("b", {}, r.course_code), h("span", { class: "row-sub" }, formatDate(r.created_at), edited && " (edited)")),
+      h("div", { class: "review-head" },
+        h("a", { href: `#/class/${encodeURIComponent(r.course_code)}`, class: "review-course" }, r.course_code),
+        h("span", { class: "row-sub" }, formatDate(r.created_at), edited && " (edited)")),
+      courseTitle(catalog, r.course_code) && h("p", { class: "row-sub strong" }, courseTitle(catalog, r.course_code)),
       h("p", { class: "row-sub" }, facts),
       h("p", { class: "review-body" }, r.body),
       (r.tags.length > 0 || r.other_tag) && h("div", { class: "tags" },
@@ -669,7 +751,10 @@ function reviewCard(r) {
 // ---------- Review form (new + edit) ----------
 
 async function renderForm(view, { professorId = null, reviewId = null, course: presetCourse = null }) {
-  const profs = await q(supabase.from("professors").select("id, name, department").order("name"));
+  const [profs, catalog] = await Promise.all([
+    q(supabase.from("professors").select("id, name, department").order("name")),
+    loadCatalog(),
+  ]);
   let existing = null;
   const tokens = load(TOKENS);
 
@@ -693,7 +778,8 @@ async function renderForm(view, { professorId = null, reviewId = null, course: p
   const newName = h("input", { id: "new-name", class: "input", maxlength: 100, placeholder: "e.g. Dr. Jane Smith" });
   const newDept = h("input", { id: "new-dept", class: "input", maxlength: 100, list: "depts", placeholder: "e.g. Finance" });
   const deptList = h("datalist", { id: "depts" },
-    [...new Set(profs.map((p) => p.department).filter(Boolean))].map((d) => h("option", { value: d })));
+    [...new Set([...profs.map((p) => p.department), ...Object.values(catalog.departments)].filter(Boolean))].sort()
+      .map((d) => h("option", { value: d })));
   const newProfBox = h("div", { class: "subfields", hidden: true },
     field("Professor's name", "new-name", newName),
     field("Department", "new-dept", newDept),
@@ -701,17 +787,53 @@ async function renderForm(view, { professorId = null, reviewId = null, course: p
   profSelect.addEventListener("change", () => {
     newProfBox.hidden = profSelect.value !== NEW;
     newName.required = profSelect.value === NEW;
+    const code = catalog.byKey.get(compact(courseInput.value));
+    if (profSelect.value === NEW && code && !newDept.value) newDept.value = catalog.departments[coursePrefix(code)] || "";
   });
 
+  // Class box: type a code or a word, pick from matching UW courses.
   const courseInput = h("input", {
-    id: "course", class: "input", required: true, maxlength: 20, placeholder: "e.g. FIN 3010", autocapitalize: "characters",
+    id: "course", class: "input", required: true, maxlength: 20, placeholder: "e.g. FIN 350", autocapitalize: "characters",
+    autocomplete: "off", role: "combobox", "aria-autocomplete": "list", "aria-controls": "course-suggestions", "aria-expanded": "false",
     value: existing?.course_code || presetCourse,
   });
+  const suggestions = h("div", { class: "suggestions", id: "course-suggestions", role: "listbox", hidden: true });
+  const coursePicked = h("p", { class: "course-picked" });
+  function updateCoursePicked() {
+    const code = catalog.byKey.get(compact(courseInput.value));
+    coursePicked.textContent = code ? `${code} · ${courseTitle(catalog, code)}` : "";
+    return code;
+  }
+  function pickCourse(code) {
+    courseInput.value = code;
+    hideSuggestions();
+    updateCoursePicked();
+    if (!newDept.value) newDept.value = catalog.departments[coursePrefix(code)] || "";
+  }
+  function hideSuggestions() {
+    suggestions.hidden = true;
+    courseInput.setAttribute("aria-expanded", "false");
+  }
+  courseInput.addEventListener("input", () => {
+    const exact = updateCoursePicked();
+    const matches = findCourses(catalog, courseInput.value, 6);
+    if (matches.length === 0 || (exact && matches.length === 1)) return hideSuggestions();
+    suggestions.replaceChildren(...matches.map((c) => h("button", {
+      type: "button", class: "suggestion", role: "option",
+      onmousedown: (e) => e.preventDefault(), // keep focus so the click lands
+      onclick: () => pickCourse(c.code),
+    }, h("b", {}, c.code), h("span", {}, c.title))));
+    suggestions.hidden = false;
+    courseInput.setAttribute("aria-expanded", "true");
+  });
+  courseInput.addEventListener("blur", () => setTimeout(hideSuggestions, 150));
+  courseInput.addEventListener("keydown", (e) => { if (e.key === "Escape") hideSuggestions(); });
+  updateCoursePicked();
 
   const now = new Date();
   const [existingTerm, existingYear] = existing ? existing.semester.split(" ") : [];
   const month = now.getMonth();
-  const currentTerm = month < 3 ? "Winter" : month < 6 ? "Spring" : month < 8 ? "Summer" : "Fall";
+  const currentTerm = month < 3 ? "Winter" : month < 6 ? "Spring" : month < 8 ? "Summer" : "Autumn";
   const selectedTerm = existingTerm || currentTerm;
   const termPicker = h("div", { class: "choice-row" },
     TERMS.map((t) => h("label", { class: "choice" },
@@ -747,7 +869,8 @@ async function renderForm(view, { professorId = null, reviewId = null, course: p
       h("h1", {}, existing ? "Edit your review" : "Rate a professor"),
       h("p", { class: "row-sub" }, "The good, the bad, and the ugly. All reviews and responses are anonymous. Keep it about the class and the teaching.")),
     h("div", { class: "q" },
-      field("Class", "course", courseInput),
+      field("Class", "course", h("div", { class: "combo" }, courseInput, suggestions), "Type the course code or name. UW Seattle courses only."),
+      coursePicked,
       field("Professor", "prof", profSelect),
       newProfBox,
       h("fieldset", { class: "field" }, h("legend", {}, "Quarter taken"), h("div", { class: "term-row" }, termPicker, year))),
@@ -772,7 +895,13 @@ async function renderForm(view, { professorId = null, reviewId = null, course: p
     e.preventDefault();
     status.hidden = true;
 
-    const course = normalizeCourse(courseInput.value);
+    const catalogCode = catalog.byKey.get(compact(courseInput.value));
+    const course = catalogCode || normalizeCourse(courseInput.value);
+    if (!catalogCode && catalog.list.length > 0
+      && !confirm(`"${course}" isn't in the UW course catalog. Post it anyway? (Tap Cancel to fix the class code.)`)) {
+      courseInput.focus();
+      return;
+    }
     const text = body.value.trim();
     if (text.length < 10) return showStatus("Please write a little more in your review.");
 
