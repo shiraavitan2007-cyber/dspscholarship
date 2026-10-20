@@ -10,10 +10,11 @@ const TAGS = [
   "So Many Papers", "Caring", "Respected", "Lecture Heavy",
   "Test Heavy", "Graded By Few Things", "Accessible Outside Class", "Online Savvy",
 ];
-// Must match reviews_grade_check in supabase/schema.sql. [stored value, label]
+// UW decimal grades: 4.0 down to 0.7 in 0.1 steps, then 0.0. Must match reviews_grade_check
+// in supabase/schema.sql. [stored value, label]
 const GRADES = [
-  ["A+", "A+"], ["A", "A"], ["A-", "A-"], ["B+", "B+"], ["B", "B"], ["B-", "B-"],
-  ["C+", "C+"], ["C", "C"], ["C-", "C-"], ["D+", "D+"], ["D", "D"], ["D-", "D-"], ["F", "F"],
+  ...Array.from({ length: 34 }, (_, i) => { const g = (40 - i) / 10; return [g.toFixed(1), g.toFixed(1)]; }),
+  ["0.0", "0.0"],
   ["S", "S (satisfactory)"], ["NS", "NS (not satisfactory)"], ["Dropped", "Dropped the class"],
 ];
 // UW quarters. Must match reviews_semester_check in supabase/schema.sql
@@ -879,7 +880,7 @@ async function renderForm(view, { professorId = null, reviewId = null, course: p
     h("div", { class: "q" },
       h("fieldset", { class: "field" }, h("legend", {}, "Would you take it again?"), yesNo("take_again", existing?.take_again)),
       h("fieldset", { class: "field" }, h("legend", {}, "Attendance mandatory?"), yesNo("attendance", existing?.attendance_mandatory)),
-      field("Grade received (optional)", "grade", grade, "Choose \"Dropped\" or S/NS if that applies.")),
+      field("Grade received (optional)", "grade", grade, "UW grade from 4.0 to 0.0. Choose S/NS or \"Dropped\" if that applies.")),
     h("div", { class: "q" },
       field("Share your unfiltered thoughts here!", "body", body,
         "Please share as much as you are willing to. This is by far the most helpful part of the review."),
