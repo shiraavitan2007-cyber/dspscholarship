@@ -74,17 +74,21 @@ create index if not exists reviews_professor_id_idx on public.reviews (professor
 alter table public.reviews add column if not exists attendance_mandatory boolean;
 alter table public.reviews add column if not exists other_tag text;
 
--- UW decimal grades: 4.0 down to 0.7 in 0.1 steps, or 0.0; plus S/NS and Dropped.
--- Older letter grades are converted using UW's letter-to-number ranges.
+-- UW grading system (https://www.washington.edu/students/gencat/front/Grading_Sys.html):
+-- decimal grades 4.0 down to 0.7 in 0.1 steps, or 0.0 (E); plus the notations
+-- S, NS, CR, NC, I (incomplete), N (in progress), W, HW, RD, and X (no grade submitted).
+-- Older values are converted using UW's letter-to-number ranges.
 alter table public.reviews drop constraint if exists reviews_grade_check;
 update public.reviews set grade = case grade
   when 'A+' then '4.0' when 'A' then '4.0' when 'A-' then '3.7' when 'B+' then '3.3' when 'B' then '3.0'
   when 'B-' then '2.7' when 'C+' then '2.3' when 'C' then '2.0' when 'C-' then '1.7' when 'D+' then '1.3'
-  when 'D' then '1.0' when 'D-' then '0.7' when 'F' then '0.0' when 'Pass' then 'S' when 'Withdrew' then 'Dropped'
+  when 'D' then '1.0' when 'D-' then '0.7' when 'F' then '0.0' when 'E' then '0.0' when 'Pass' then 'S'
+  when 'Withdrew' then 'W' when 'Dropped' then 'W'
   else grade end
 where grade is not null;
 alter table public.reviews add constraint reviews_grade_check
-  check (grade ~ '^(4\.0|[1-3]\.[0-9]|0\.[7-9]|0\.0)$' or grade in ('S', 'NS', 'Dropped'));
+  check (grade ~ '^(4\.0|[1-3]\.[0-9]|0\.[7-9]|0\.0)$'
+         or grade in ('S', 'NS', 'CR', 'NC', 'I', 'N', 'W', 'HW', 'RD', 'X'));
 alter table public.reviews drop constraint if exists reviews_tags_check;
 alter table public.reviews add constraint reviews_tags_check check (cardinality(tags) <= 25);
 alter table public.reviews drop constraint if exists reviews_body_check;

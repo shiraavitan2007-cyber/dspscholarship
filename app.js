@@ -10,13 +10,20 @@ const TAGS = [
   "So Many Papers", "Caring", "Respected", "Lecture Heavy",
   "Test Heavy", "Graded By Few Things", "Accessible Outside Class", "Online Savvy",
 ];
-// UW decimal grades: 4.0 down to 0.7 in 0.1 steps, then 0.0. Must match reviews_grade_check
-// in supabase/schema.sql. [stored value, label]
-const GRADES = [
-  ...Array.from({ length: 34 }, (_, i) => { const g = (40 - i) / 10; return [g.toFixed(1), g.toFixed(1)]; }),
-  ["0.0", "0.0"],
-  ["S", "S (satisfactory)"], ["NS", "NS (not satisfactory)"], ["Dropped", "Dropped the class"],
+// UW grading system (washington.edu/students/gencat/front/Grading_Sys.html).
+// Must match reviews_grade_check in supabase/schema.sql. [stored value, label]
+const NUMERIC_GRADES = [
+  ...Array.from({ length: 34 }, (_, i) => { const g = ((40 - i) / 10).toFixed(1); return [g, g]; }), // 4.0 … 0.7
+  ["0.0", "0.0 (failing, no credit)"],
 ];
+const GRADE_NOTATIONS = [
+  ["S", "S: Satisfactory"], ["NS", "NS: Not satisfactory"],
+  ["CR", "CR: Credit"], ["NC", "NC: No credit"],
+  ["I", "I: Incomplete"], ["N", "N: In progress"],
+  ["W", "W: Withdrawal"], ["HW", "HW: Hardship withdrawal"], ["RD", "RD: Registrar drop"],
+  ["X", "X: No grade submitted"],
+];
+const GRADES = [...NUMERIC_GRADES, ...GRADE_NOTATIONS];
 // UW quarters. Must match reviews_semester_check in supabase/schema.sql
 const TERMS = ["Autumn", "Winter", "Spring", "Summer"];
 const OVERALL_LABELS = ["", "Awful", "Poor", "OK", "Good", "Awesome"];
@@ -695,8 +702,10 @@ async function renderProfessor(view, id) {
   update();
 }
 
+// "3.7" stays "3.7"; "W" becomes "W (withdrawal)".
 function gradeLabel(value) {
-  return GRADES.find(([v]) => v === value)?.[1] || value;
+  const label = GRADE_NOTATIONS.find(([v]) => v === value)?.[1];
+  return label ? `${value} (${label.split(": ")[1].toLowerCase()})` : value;
 }
 
 function stat(value, label) {
@@ -846,7 +855,8 @@ async function renderForm(view, { professorId = null, reviewId = null, course: p
 
   const grade = h("select", { id: "grade", class: "input", value: existing?.grade || "" },
     h("option", { value: "" }, "Prefer not to say"),
-    GRADES.map(([value, label]) => h("option", { value }, label)));
+    h("optgroup", { label: "Grade (4.0–0.0)" }, NUMERIC_GRADES.map(([value, label]) => h("option", { value }, label))),
+    h("optgroup", { label: "Other UW grades" }, GRADE_NOTATIONS.map(([value, label]) => h("option", { value }, label))));
 
   const tagBoxes = TAGS.map((t) => h("input", { type: "checkbox", name: "tags", value: t, checked: existing?.tags.includes(t) }));
   const otherTag = h("input", { id: "other-tag", class: "input", maxlength: 40, placeholder: "Other (optional)", value: existing?.other_tag });
@@ -880,7 +890,7 @@ async function renderForm(view, { professorId = null, reviewId = null, course: p
     h("div", { class: "q" },
       h("fieldset", { class: "field" }, h("legend", {}, "Would you take it again?"), yesNo("take_again", existing?.take_again)),
       h("fieldset", { class: "field" }, h("legend", {}, "Attendance mandatory?"), yesNo("attendance", existing?.attendance_mandatory)),
-      field("Grade received (optional)", "grade", grade, "UW grade from 4.0 to 0.0. Choose S/NS or \"Dropped\" if that applies.")),
+      field("Grade received (optional)", "grade", grade, "UW grade from 4.0 to 0.0, or another UW grade like S/NS, CR/NC, I, or W.")),
     h("div", { class: "q" },
       field("Share your unfiltered thoughts here!", "body", body,
         "Please share as much as you are willing to. This is by far the most helpful part of the review."),
