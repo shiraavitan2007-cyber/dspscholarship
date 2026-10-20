@@ -5,17 +5,42 @@
 -- =============================================================
 
 -- ---------- Who is allowed in ----------
--- The two shared logins. If you change these emails, change config.js too.
+-- Brothers sign in with UW Google; only emails on this roster get in. Admins manage it.
+create table if not exists public.members (
+  email text primary key check (email = lower(email) and email ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$'),
+  is_admin boolean not null default false,
+  added_at timestamptz not null default now()
+);
+alter table public.members enable row level security;
+revoke all on public.members from anon, authenticated;
+
+-- Members are: roster emails signed in with Google, the shared chapter login (while
+-- admins allow it), and the shared admin login (kept as an emergency backup).
+-- If you change the shared login emails, change config.js too.
 create or replace function public.is_member() returns boolean
-language sql stable
+language plpgsql stable security definer set search_path = public
 as $$
-  select coalesce(auth.jwt() ->> 'email', '') in ('members@dspscholarship.com', 'admin@dspscholarship.com')
+declare v_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
+begin
+  if v_email = 'admin@dspscholarship.com' then return true; end if;
+  if v_email = 'members@dspscholarship.com' then
+    return coalesce((select allow_chapter_password from app_settings where id = 1), true);
+  end if;
+  -- Google has verified the email; a password sign-up with a roster email would not count.
+  return coalesce(auth.jwt() -> 'app_metadata' ->> 'provider', '') = 'google'
+     and exists (select 1 from members where email = v_email);
+end
 $$;
 
 create or replace function public.is_admin() returns boolean
-language sql stable
+language plpgsql stable security definer set search_path = public
 as $$
-  select coalesce(auth.jwt() ->> 'email', '') = 'admin@dspscholarship.com'
+declare v_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
+begin
+  if v_email = 'admin@dspscholarship.com' then return true; end if;
+  return coalesce(auth.jwt() -> 'app_metadata' ->> 'provider', '') = 'google'
+     and exists (select 1 from members where email = v_email and is_admin);
+end
 $$;
 
 -- Tags reviewers can pick. Keep in sync with TAGS in app.js.
@@ -352,6 +377,8 @@ create table if not exists public.app_settings (
   current_quarter text not null check (current_quarter ~ '^(Autumn|Winter|Spring|Summer) [0-9]{4}$')
 );
 insert into public.app_settings (id, current_quarter) values (1, 'Winter 2027') on conflict (id) do nothing;
+-- Admins turn this off once every brother is on the roster and signs in with Google.
+alter table public.app_settings add column if not exists allow_chapter_password boolean not null default true;
 
 -- Brother profiles: full name + 4-digit PIN (only its bcrypt hash is stored).
 create table if not exists public.brothers (
@@ -644,6 +671,82 @@ begin
   delete from schedules where quarter = p_quarter;
   get diagnostics v_count = row_count;
   return v_count;
+end
+$$;
+
+-- =============================================================
+-- Roster (who can sign in with Google)
+-- =============================================================
+
+-- What the signed-in account can do. Callable by anyone signed in, even if not on the roster,
+-- so the site can explain why they can't get in.
+create or replace function public.my_access() returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare v_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
+begin
+  return jsonb_build_object(
+    'member', is_member(),
+    'admin', is_admin(),
+    'email', v_email,
+    'via', case when v_email = 'members@dspscholarship.com' then 'chapter'
+                when v_email = 'admin@dspscholarship.com' then 'admin'
+                else coalesce(auth.jwt() -> 'app_metadata' ->> 'provider', 'unknown') end,
+    'chapter_password_on', coalesce((select allow_chapter_password from app_settings where id = 1), true));
+end
+$$;
+
+create or replace function public.admin_list_members()
+returns table (email text, is_admin boolean, added_at timestamptz, last_sign_in timestamptz)
+language sql stable security definer set search_path = public
+as $$
+  select m.email, m.is_admin, m.added_at,
+         (select max(u.last_sign_in_at) from auth.users u where lower(u.email) = m.email)
+  from members m
+  where is_admin()
+  order by m.email
+$$;
+
+-- Adds emails to the roster (duplicates ignored). Returns how many were new.
+create or replace function public.admin_add_members(p_emails text[]) returns int
+language plpgsql security definer set search_path = public
+as $$
+declare v_count int;
+begin
+  if not is_admin() then raise exception 'Admins only'; end if;
+  insert into members (email)
+    select distinct lower(trim(e)) from unnest(p_emails) e
+    where lower(trim(e)) ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+  on conflict (email) do nothing;
+  get diagnostics v_count = row_count;
+  return v_count;
+end
+$$;
+
+create or replace function public.admin_remove_member(p_email text) returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not is_admin() then raise exception 'Admins only'; end if;
+  delete from members where email = lower(trim(p_email));
+end
+$$;
+
+create or replace function public.admin_set_member_admin(p_email text, p_is_admin boolean) returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not is_admin() then raise exception 'Admins only'; end if;
+  update members set is_admin = p_is_admin where email = lower(trim(p_email));
+end
+$$;
+
+create or replace function public.admin_set_chapter_password(p_allowed boolean) returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not is_admin() then raise exception 'Admins only'; end if;
+  update app_settings set allow_chapter_password = p_allowed where id = 1;
 end
 $$;
 

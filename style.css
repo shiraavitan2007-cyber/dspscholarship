@@ -149,6 +149,18 @@ button { font: inherit; }
 .signin-label { font-weight: 800; font-size: 0.95rem; }
 .signin-form .btn { margin: 4px 0 0; }
 .signin-note { margin: 4px 0 0; text-align: center; font-size: 0.8rem; color: var(--muted); }
+.btn.google { background: #fff; color: var(--ink); border: 1px solid var(--line); box-shadow: 0 2px 8px rgba(51, 0, 102, 0.08); }
+.btn.google .icon { width: 22px; height: 22px; }
+.signin-alt { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+.signin-alt summary { cursor: pointer; text-align: center; font-size: 0.85rem; font-weight: 700; color: var(--purple); list-style: none; min-height: 32px; }
+.signin-alt summary::-webkit-details-marker { display: none; }
+.signin-alt[open] summary { margin-bottom: 12px; }
+.signin-alt .input { margin: 8px 0 10px; }
+.noaccess-msg { margin: 0 0 8px; font-size: 1rem; line-height: 1.5; overflow-wrap: anywhere; }
+.admin-badge { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--gold); color: var(--purple); font-size: 0.7rem; font-weight: 800; vertical-align: middle; }
+.break { overflow-wrap: anywhere; }
+.panel textarea.input { margin: 10px 0 6px; }
+.panel > .input[type="search"] { margin: 10px 0 4px; }
 
 .wordmark { font-size: 1.9rem; font-weight: 800; letter-spacing: -0.03em; color: var(--ink); text-decoration: none; }
 .wordmark span { color: var(--purple); }

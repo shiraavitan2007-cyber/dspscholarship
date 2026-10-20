@@ -4,7 +4,17 @@ Internal professor reviews for our Delta Sigma Pi chapter, live at https://dspsc
 Hosted on GitHub Pages; reviews are stored in Supabase (project `dsp-professor-reviews`:
 https://supabase.com/dashboard/project/ntmfodbezvygvmgblhwy).
 
-## How access works
+## Sign-in with UW Google (roster)
+- Brothers tap **Sign in with UW Google**. Only emails on the **roster** get in; anyone else sees
+  "not on the roster" and the database refuses them everything.
+- **Add brothers:** Admin → Sign-in & roster → paste emails (any format, e.g. a column copied from a
+  spreadsheet) → Add to roster. Remove alumni the same way. Make officers admins there.
+- **Chapter password:** still works until you turn it off (Admin → Sign-in & roster). Turn it off once
+  the roster is complete. The admin password always works as an emergency backup.
+- Google sign-in settings live in Google Cloud (OAuth client) and Supabase → Authentication →
+  Sign In / Providers → Google. Supabase's Site URL is https://dspscholarship.com.
+
+## How access works (shared logins)
 - There are two shared logins in Supabase (Authentication → Users):
   - `members@dspscholarship.com`: the **chapter password** everyone uses
   - `admin@dspscholarship.com`: the **admin password** for officers

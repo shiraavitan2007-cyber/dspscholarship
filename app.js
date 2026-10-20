@@ -47,6 +47,7 @@ const ICONS = {
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></svg>',
   people: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.8c1.9.7 3.2 2.4 3.5 5.2"/></svg>',
+  google: '<svg viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.2l7.9 6.2C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C1 16.6 0 20.2 0 24s1 7.4 2.7 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.2 1.5-5 2.3-8.2 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.2C6.6 42.6 14.6 48 24 48z"/></svg>',
   person: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4.2 4-6.5 8-6.5s7.2 2.3 8 6.5"/></svg>',
   star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></svg>',
   signout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
@@ -54,8 +55,10 @@ const ICONS = {
 
 const app = document.getElementById("app");
 const configured = Boolean(CONFIG.SUPABASE_URL) && !CONFIG.SUPABASE_URL.startsWith("PASTE");
-const supabase = configured ? createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY) : null;
+// PKCE: Google sends people back with ?code=… instead of a #token, which would clash with the hash routes.
+const supabase = configured ? createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, { auth: { flowType: "pkce" } }) : null;
 let session = null;
+let access = null; // from my_access(): { member, admin, email, via, chapter_password_on }
 const browseState = { sort: "rating" };
 const homeState = { chart: "trending" };
 
@@ -241,7 +244,11 @@ function personAvatar(schedule, cls = "avatar") {
 }
 
 function isAdmin() {
-  return session?.user?.email === CONFIG.ADMIN_EMAIL;
+  return Boolean(access?.admin);
+}
+
+async function loadAccess() {
+  try { return await call("my_access"); } catch { return null; }
 }
 
 function fmt(n) {
@@ -326,6 +333,7 @@ function emptyState(text, withButton = true) {
 async function render() {
   if (!configured) return renderSetup();
   if (!session) return renderLogin();
+  if (!access?.member) return renderNoAccess();
 
   const [path, queryString] = location.hash.slice(1).split("?");
   const parts = (path || "/").split("/").filter(Boolean);
@@ -976,14 +984,35 @@ function renderLogin() {
   document.body.classList.remove("signed-in");
   const input = h("input", { type: "password", id: "password", class: "input", autocomplete: "current-password", required: true, placeholder: "Enter the chapter password" });
   const msg = h("p", { class: "error", hidden: true });
-  const btn = h("button", { class: "btn gold block big", type: "submit" }, "Sign in");
+  const btn = h("button", { class: "btn purple block", type: "submit" }, "Sign in with password");
+  const googleMsg = h("p", { class: "error", hidden: true });
+
+  const google = h("button", {
+    type: "button", class: "btn google block big",
+    onclick: async () => {
+      googleMsg.hidden = true;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        // hd suggests UW accounts in Google's account picker; the roster is what actually decides.
+        options: { redirectTo: location.origin + location.pathname, queryParams: { hd: "uw.edu", prompt: "select_account" } },
+      });
+      if (error) {
+        googleMsg.textContent = /not enabled|provider/i.test(error.message) ? "Google sign-in isn't set up yet. Use the chapter password for now." : error.message;
+        googleMsg.hidden = false;
+      }
+    },
+  }, icon("google"), "Sign in with UW Google");
 
   const form = h("form", { class: "signin-form" },
-    h("label", { for: "password", class: "signin-label" }, "Chapter password"),
-    input,
-    msg,
-    btn,
-    h("p", { class: "signin-note" }, "For Delta Sigma Pi brothers only."));
+    google,
+    googleMsg,
+    h("p", { class: "signin-note" }, "Use your @uw.edu account. For Delta Sigma Pi brothers on the chapter roster."),
+    h("details", { class: "signin-alt" },
+      h("summary", {}, "Use the chapter password instead"),
+      h("label", { for: "password", class: "signin-label" }, "Chapter password"),
+      input,
+      msg,
+      btn));
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1007,7 +1036,25 @@ function renderLogin() {
       h("h1", {}, "Welcome back, brother"),
       h("p", {}, "RateMyBrofessor · What'sBroTaking")),
     h("section", { class: "signin-bottom" }, form)));
-  input.focus();
+}
+
+// Signed in, but not allowed: not on the roster, or the chapter password was turned off.
+function renderNoAccess() {
+  document.body.classList.remove("signed-in");
+  const viaPassword = access?.via === "chapter";
+  const message = !access
+    ? "We couldn't check your access. Check your connection and try again."
+    : viaPassword
+      ? "The chapter password has been turned off. Sign in with your UW Google account instead."
+      : `You're signed in as ${access.email}, but that email isn't on the chapter roster yet. Ask the VP of Scholarship to add you, then sign in again.`;
+  app.replaceChildren(h("main", { class: "signin" },
+    h("section", { class: "signin-top" },
+      h("span", { class: "signin-crest", "aria-hidden": "true" }, "ΔΣΠ"),
+      h("h1", {}, viaPassword ? "Sign in with Google" : "Almost there")),
+    h("section", { class: "signin-bottom" },
+      h("div", { class: "signin-form" },
+        h("p", { class: "noaccess-msg" }, message),
+        h("button", { type: "button", class: "btn gold block big", onclick: signOut }, viaPassword ? "Back to sign in" : "Sign out and try another account")))));
 }
 
 // ---------- Home ----------
@@ -1662,9 +1709,10 @@ async function renderAdmin(view) {
     q(supabase.from("professor_stats").select("id, name, department, review_count").order("name")),
     loadCurrentQuarter(),
   ]);
-  const [schedules, quarters, brothers] = await Promise.all([
+  const [schedules, quarters, brothers, roster] = await Promise.all([
     loadQuarter(current), loadQuarterList(current),
     q(supabase.from("brothers").select("id, full_name").order("full_name")),
+    call("admin_list_members"),
   ]);
 
   const flaggedList = flagged.length
@@ -1704,8 +1752,9 @@ async function renderAdmin(view) {
       }, "Delete"))));
 
   view.replaceChildren(
-    pageHeader("Admin", { back: "#/", subtitle: "Signed in with the admin password." }),
+    pageHeader("Admin", { back: "#/", subtitle: access?.via === "google" ? `Signed in as ${access.email}` : "Signed in with the admin password." }),
     h("main", { class: "wrap page" },
+      rosterAdmin(roster),
       wbtAdmin(current, schedules, quarters, brothers),
       h("section", {}, h("div", { class: "section-head" }, h("h2", {}, `Reported reviews (${flagged.length})`)), flaggedList),
       h("section", {}, h("div", { class: "section-head" }, h("h2", {}, `Professors (${profs.length})`)),
@@ -1715,6 +1764,107 @@ async function renderAdmin(view) {
           "The password brothers use. Everyone gets signed out within the hour and needs the new one."),
         passwordForm("admin", "Admin password", "The password officers use for this Admin page.")),
       h("p", { class: "signout-line" }, h("button", { type: "button", class: "link muted", onclick: signOut }, "Sign out of this device"))));
+}
+
+// Who can sign in: paste emails, manage admins, turn off the shared chapter password.
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+
+function rosterAdmin(roster) {
+  const chapterOn = access?.chapter_password_on !== false;
+  const signedInCount = roster.filter((m) => m.last_sign_in).length;
+
+  // Paste box: pulls every email out of whatever is pasted (a column from a sheet, a list, etc.)
+  const paste = h("textarea", { id: "roster-paste", class: "input", rows: 5, placeholder: "Paste emails here: one per line, or copied straight from a spreadsheet." });
+  const found = h("p", { class: "hint" });
+  const addBtn = h("button", { type: "submit", class: "btn purple small", disabled: true }, "Add to roster");
+  const parse = () => [...new Set((paste.value.match(EMAIL_RE) || []).map((e) => e.toLowerCase()))];
+  paste.addEventListener("input", () => {
+    const emails = parse();
+    const notUw = emails.filter((e) => !e.endsWith("@uw.edu"));
+    const already = emails.filter((e) => roster.some((m) => m.email === e));
+    found.textContent = emails.length
+      ? [`${plural(emails.length, "email")} found`, already.length && `${already.length} already on the roster`,
+        notUw.length && `${notUw.length} not @uw.edu (they can only sign in if it's a Google account)`].filter(Boolean).join(" · ")
+      : "";
+    addBtn.disabled = emails.length === 0;
+  });
+  const addForm = h("form", { class: "panel" },
+    h("h3", {}, "Add brothers"),
+    h("p", { class: "row-sub" }, "Brothers sign in with their UW Google account. Only emails on this roster can get in."),
+    h("label", { for: "roster-paste", class: "sr-only" }, "Emails to add"),
+    paste, found, addBtn);
+  addForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const n = await call("admin_add_members", { p_emails: parse() });
+      alert(n ? `Added ${plural(n, "brother")} to the roster.` : "Everyone you pasted is already on the roster.");
+      render();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+
+  // Roster list with search
+  const search = h("input", { type: "search", class: "input", placeholder: "Search the roster", "aria-label": "Search the roster" });
+  const list = h("div", {});
+  function update() {
+    const term = search.value.trim().toLowerCase();
+    const rows = roster.filter((m) => m.email.includes(term));
+    list.replaceChildren(...(rows.length ? rows.map((m) => h("div", { class: "admin-row" },
+      h("div", { class: "grow" },
+        h("strong", { class: "break" }, m.email), m.is_admin && h("span", { class: "admin-badge" }, "Admin"),
+        h("div", { class: "row-sub" }, m.last_sign_in ? `Last signed in ${formatDate(m.last_sign_in)}` : "Hasn't signed in yet")),
+      h("div", { class: "review-actions" },
+        h("button", {
+          type: "button", class: "link",
+          onclick: async () => {
+            if (m.is_admin && m.email === access?.email && !confirm("Remove your own admin access?")) return;
+            if (await act("admin_set_member_admin", { p_email: m.email, p_is_admin: !m.is_admin })) render();
+          },
+        }, m.is_admin ? "Remove admin" : "Make admin"),
+        h("button", {
+          type: "button", class: "link danger-text",
+          onclick: async () => {
+            const self = m.email === access?.email;
+            if (!confirm(self ? "Remove YOURSELF from the roster? You'll lose access right away." : `Remove ${m.email} from the roster? They won't be able to sign in.`)) return;
+            if (await act("admin_remove_member", { p_email: m.email })) render();
+          },
+        }, "Remove"))))
+      : [h("p", { class: "row-sub" }, roster.length ? "No matches." : "No one on the roster yet.")]));
+  }
+  search.addEventListener("input", update);
+  update();
+
+  const hasGoogleAdmin = roster.some((m) => m.is_admin && m.last_sign_in);
+  const chapter = h("div", { class: "panel" },
+    h("h3", {}, `Chapter password: ${chapterOn ? "on" : "off"}`),
+    h("p", { class: "row-sub" }, chapterOn
+      ? "Brothers can still sign in with the shared chapter password. Turn it off once everyone is on the roster, so only roster members get in."
+      : "Only brothers on the roster can sign in (with UW Google). The admin password still works as a backup."),
+    !hasGoogleAdmin && chapterOn && h("p", { class: "notice" }, "Before turning it off, make yourself an admin on the roster and sign in once with Google, so you're not relying on the shared passwords."),
+    h("button", {
+      type: "button", class: `btn small ${chapterOn ? "danger" : "purple"}`,
+      onclick: async () => {
+        const msg = chapterOn
+          ? "Turn OFF the chapter password? Anyone not on the roster will be signed out of access right away."
+          : "Turn the chapter password back ON? Anyone with it will be able to get in.";
+        if (!confirm(msg)) return;
+        if (await act("admin_set_chapter_password", { p_allowed: !chapterOn })) {
+          access = await loadAccess();
+          render();
+        }
+      },
+    }, chapterOn ? "Turn off chapter password" : "Turn chapter password back on"));
+
+  return h("section", {},
+    h("div", { class: "section-head" }, h("h2", {}, "Sign-in & roster")),
+    addForm,
+    h("div", { class: "panel" },
+      h("h3", {}, `Roster (${roster.length})`),
+      h("p", { class: "row-sub" }, `${signedInCount} of ${roster.length} have signed in with Google.`),
+      roster.length > 6 && search,
+      list),
+    chapter);
 }
 
 // What'sBroTaking tools: current quarter, fix schedules, clear old quarters.
@@ -1838,11 +1988,19 @@ function passwordForm(which, title, description) {
 
 if (supabase) {
   session = (await supabase.auth.getSession()).data.session;
+  // Coming back from Google: supabase-js has used the ?code=…; drop it from the address bar.
+  if (new URLSearchParams(location.search).has("code")) history.replaceState(null, "", location.pathname + location.hash);
+  if (session) access = await loadAccess();
   supabase.auth.onAuthStateChange((_event, next) => {
     const changed = next?.user?.id !== session?.user?.id;
     session = next;
     // Deferred: calling Supabase inside this callback can deadlock.
-    if (changed) setTimeout(render, 0);
+    if (changed) {
+      setTimeout(async () => {
+        access = session ? await loadAccess() : null;
+        render();
+      }, 0);
+    }
   });
 }
 window.addEventListener("hashchange", () => { render(); window.scrollTo(0, 0); });
