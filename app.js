@@ -974,18 +974,16 @@ function renderSetup() {
 
 function renderLogin() {
   document.body.classList.remove("signed-in");
-  const input = h("input", { type: "password", id: "password", class: "input", autocomplete: "current-password", required: true, placeholder: "Chapter password" });
+  const input = h("input", { type: "password", id: "password", class: "input", autocomplete: "current-password", required: true, placeholder: "Enter the chapter password" });
   const msg = h("p", { class: "error", hidden: true });
-  const btn = h("button", { class: "btn gold block", type: "submit" }, "Sign in");
+  const btn = h("button", { class: "btn gold block big", type: "submit" }, "Sign in");
 
-  const form = h("form", { class: "login-card" },
-    h("span", { class: "crest" }, "ΔΣΠ"),
-    h("h1", { class: "wordmark" }, "RateMy", h("span", {}, "Bro"), "fessor"),
-    h("p", { class: "muted" }, "Professor reviews by Delta Sigma Pi brothers, for brothers."),
-    h("label", { for: "password", class: "sr-only" }, "Password"),
+  const form = h("form", { class: "signin-form" },
+    h("label", { for: "password", class: "signin-label" }, "Chapter password"),
     input,
     msg,
-    btn);
+    btn,
+    h("p", { class: "signin-note" }, "For Delta Sigma Pi brothers only."));
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1002,7 +1000,13 @@ function renderLogin() {
     }
   });
 
-  app.replaceChildren(h("main", { class: "login-screen" }, form));
+  // Split screen: purple welcome on top, gold line, password below.
+  app.replaceChildren(h("main", { class: "signin" },
+    h("section", { class: "signin-top" },
+      h("span", { class: "signin-crest", "aria-hidden": "true" }, "ΔΣΠ"),
+      h("h1", {}, "Welcome back, brother"),
+      h("p", {}, "RateMyBrofessor · What'sBroTaking")),
+    h("section", { class: "signin-bottom" }, form)));
   input.focus();
 }
 
