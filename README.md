@@ -53,13 +53,12 @@ After signing in, brothers land on a hub page with two apps:
 - **What'sBroTaking** (`#/wbt`): which classes brothers are registered for each quarter.
 
 ## What'sBroTaking
-- Each brother has a **profile**: full name + **4-digit PIN** (Profile tab → Create profile).
-  Signing in to it once keeps that phone signed in for 180 days; from then on they add and edit
-  their classes (UW class picker, required section, optional quiz section) without retyping the PIN.
-- Names and classes are visible to everyone signed in. Brothers can only edit their own classes.
-- Five wrong PINs lock a profile for 15 minutes. Brothers can change their PIN on their profile page.
-- **Forgotten PIN:** Admin → What'sBroTaking → Profiles → Reset PIN, then tell the brother the new
-  one (this also signs that profile out on every device).
+- Brothers sign in with **UW Google** and tap **+** to add their registered classes (UW class picker,
+  required section, optional quiz section). Their schedule belongs to their UW account, so they can
+  edit it from any device and can only edit their own. **My classes** shows their schedules and lets
+  them change how their name appears (it starts as their Google name).
+- Names and classes are visible to everyone signed in. Removing a brother from the roster also
+  removes their classes. Admins can delete any schedule.
 - **Current quarter:** Admin → What'sBroTaking → Current quarter. Set it to the upcoming
   quarter once registration opens, so the form and pages default to it.
 - **Old quarters:** Admin → Clear an old quarter deletes all schedules for it.
