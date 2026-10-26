@@ -331,6 +331,7 @@ function emptyState(text, withButton = true) {
 // ---------- Routing ----------
 
 async function render() {
+  document.title = "DSP Scholarship";
   if (!configured) return renderSetup();
   if (!session) return renderLogin();
   if (!access?.member) return renderNoAccess();
@@ -347,6 +348,7 @@ async function render() {
   app.replaceChildren(...[view, section !== "hub" && bottomNav(section, tab)].filter(Boolean));
   document.body.classList.add("signed-in");
   document.body.classList.toggle("no-nav", section === "hub");
+  document.title = { rmb: "RateMyBrofessor · DSP Scholarship", wbt: "What'sBroTaking · DSP Scholarship" }[section] || "DSP Scholarship";
 
   try {
     if (!parts[0]) await renderHub(view);
