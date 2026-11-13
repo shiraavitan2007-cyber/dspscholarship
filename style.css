@@ -433,6 +433,10 @@ a.pill { display: inline-flex; align-items: center; text-decoration: none; }
 .shared-title { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .shared-count { flex: none; font-size: 0.78rem; font-weight: 800; color: var(--purple); }
 .shared-names { font-size: 0.85rem; font-weight: 600; color: var(--purple); }
+.browse-link {
+  display: flex; justify-content: space-between; align-items: center; min-height: 52px; padding: 0 18px; margin-top: 4px;
+  border-radius: var(--radius); background: var(--surface); color: var(--purple); font-weight: 800; text-decoration: none;
+}
 .dept-groups { background: var(--surface); border-radius: var(--radius); padding: 0 16px; }
 .dept-group { border-bottom: 1px solid var(--line); }
 .dept-group:last-child { border-bottom: none; }

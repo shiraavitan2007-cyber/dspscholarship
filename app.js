@@ -360,6 +360,7 @@ async function render() {
       else if (parts[1] === "brother" && parts[2]) await renderWbtBrother(view, Number(parts[2]));
       else if (parts[1] === "add") await renderWbtForm(view, quarter);
       else if (parts[1] === "profile") await renderWbtProfile(view);
+      else if (parts[1] === "all") await renderWbtAll(view, quarter);
       else await renderWbtHome(view, quarter);
     } else if (parts[0] === "prof" && parts[1]) await renderProfessor(view, Number(parts[1]));
     else if (parts[0] === "review" && parts[1] === "new") {
@@ -525,21 +526,9 @@ async function renderWbtHome(view, requested) {
           h("span", { class: "shared-names" }, c.people.map(firstName).join(", ")))))
         : h("p", { class: "muted small" }, "No two brothers share a class yet.")));
 
-    // All classes, grouped by department and collapsed so the page stays short.
-    const byDept = new Map();
-    for (const c of classes) {
-      const prefix = coursePrefix(c.code);
-      byDept.set(prefix, [...(byDept.get(prefix) || []), c]);
-    }
-    const depts = [...byDept.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-    out.push(h("section", {},
-      h("div", { class: "section-head" }, h("h2", {}, "All classes"), h("span", { class: "row-sub" }, `${classesWord(classes.length)} · ${depts.length} departments`)),
-      h("div", { class: "dept-groups" }, depts.map(([prefix, list]) => h("details", { class: "dept-group" },
-        h("summary", {},
-          h("span", { class: "dept-code" }, prefix),
-          h("span", { class: "dept-name" }, catalog.departments[prefix] || ""),
-          h("span", { class: "dept-count" }, String(list.length))),
-        list.sort((a, b) => a.code.localeCompare(b.code)).map((c) => compactClassRow(c, catalog, quarter)))))));
+    // The full list lives on its own page to keep this one short.
+    out.push(h("a", { href: `#/wbt/all?quarter=${enc(quarter)}`, class: "browse-link" },
+      `Browse all ${classesWord(classes.length)}`, h("span", { "aria-hidden": "true" }, "›")));
     return out;
   }
 
@@ -572,6 +561,35 @@ async function renderWbtHome(view, requested) {
       h("a", { href: `#/wbt/add?quarter=${enc(quarter)}`, class: "btn gold block" }, icon("plus"), mine ? "Edit my classes" : "Add my classes"),
       browse));
   update();
+}
+
+// Every class brothers are taking this quarter, grouped by department.
+async function renderWbtAll(view, requested) {
+  const current = await loadCurrentQuarter();
+  const quarter = requested || current;
+  const [schedules, catalog] = await Promise.all([loadQuarter(quarter), loadCatalog()]);
+  const classes = groupByClass(schedules);
+  const byDept = new Map();
+  for (const c of classes) {
+    const prefix = coursePrefix(c.code);
+    byDept.set(prefix, [...(byDept.get(prefix) || []), c]);
+  }
+  const depts = [...byDept.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+
+  view.replaceChildren(
+    pageHeader("All classes", {
+      back: `#/wbt?quarter=${enc(quarter)}`,
+      subtitle: `${classesWord(classes.length)} brothers are taking in ${quarter}`,
+    }),
+    h("main", { class: "wrap page" },
+      depts.length
+        ? h("div", { class: "dept-groups" }, depts.map(([prefix, list]) => h("details", { class: "dept-group" },
+          h("summary", {},
+            h("span", { class: "dept-code" }, prefix),
+            h("span", { class: "dept-name" }, catalog.departments[prefix] || ""),
+            h("span", { class: "dept-count" }, String(list.length))),
+          list.sort((a, b) => a.code.localeCompare(b.code)).map((c) => compactClassRow(c, catalog, quarter)))))
+        : emptyWbt(quarter)));
 }
 
 // One-line class row: code, title, and how many brothers.
