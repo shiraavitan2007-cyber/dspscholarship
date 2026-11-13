@@ -32,8 +32,11 @@ def main():
     for page, label in re.findall(r'<a href="([a-z0-9_]+\.html)">([^<]+)</a>', index):
         m = re.match(r"(.+) \(([A-Z& ]+)\)$", clean(label))
         if m:
-            depts[m.group(2)] = m.group(1)
-            pages[page] = m.group(2)
+            name, prefix = m.group(1), m.group(2)
+            # Redirect entries like "Zoology -- See Biology (BIOL)" only name a department if nothing better does.
+            if " See " not in name or prefix not in depts:
+                depts[prefix] = name
+            pages[page] = prefix
 
     courses = {}
     for i, (page, prefix) in enumerate(sorted(pages.items())):

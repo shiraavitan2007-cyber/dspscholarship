@@ -473,19 +473,6 @@ function groupByClass(schedules) {
   return [...map.values()].sort((a, b) => b.people.length - a.people.length || a.code.localeCompare(b.code));
 }
 
-function wbtClassRow(c, catalog, quarter) {
-  const title = courseTitle(catalog, c.code);
-  return h("a", { href: `#/wbt/class/${enc(c.code)}?quarter=${enc(quarter)}`, class: "list-row" },
-    h("span", { class: "code-badge" }, coursePrefix(c.code)),
-    h("div", { class: "grow" },
-      h("div", { class: "row-title" }, c.code),
-      title && h("div", { class: "row-sub strong" }, title),
-      h("div", { class: "faces" },
-        c.people.slice(0, 6).map((s) => personAvatar(s, "mini")),
-        c.people.length > 6 && h("span", { class: "row-sub" }, `+${c.people.length - 6}`))),
-    h("span", { class: "count-chip" }, String(c.people.length), h("small", {}, c.people.length === 1 ? "brother" : "brothers")));
-}
-
 function brotherRow(s) {
   const codes = s.classes.map((c) => c.course_code).sort();
   return h("a", { href: `#/wbt/brother/${s.id}`, class: "list-row" },
@@ -500,23 +487,75 @@ async function renderWbtHome(view, requested) {
   const quarter = requested || current;
   const [schedules, quarters, catalog] = await Promise.all([loadQuarter(quarter), loadQuarterList(current), loadCatalog()]);
   const classes = groupByClass(schedules);
+  const shared = classes.filter((c) => c.people.length >= 2);
+  const mine = schedules.find((s) => access?.email && s.owner_email === access.email);
 
   const search = h("input", { id: "wbt-search", type: "search", placeholder: "Class or brother's name", enterkeyhint: "search" });
-  const list = h("div", { class: "list" });
+  const browse = h("div", {}); // the sections below, or search results while typing
+  const firstName = (s) => s.full_name.split(" ")[0];
+
+  // Everything shown when not searching: your classmates, shared classes, then all classes by department.
+  function sections() {
+    if (schedules.length === 0) return [emptyWbt(quarter)];
+    const out = [];
+
+    if (mine) {
+      const rows = [...mine.classes].sort((a, b) => a.course_code.localeCompare(b.course_code)).map((c) => {
+        const others = classes.find((x) => x.code === c.course_code).people.filter((p) => p.id !== mine.id);
+        return h("a", { href: `#/wbt/class/${enc(c.course_code)}?quarter=${enc(quarter)}`, class: "mate-row" },
+          h("b", { class: "mate-code" }, c.course_code),
+          others.length
+            ? h("span", { class: "mate-names" }, others.map((p) => p.full_name).join(", "))
+            : h("span", { class: "mate-names none" }, "No one else yet"),
+          "›");
+      });
+      out.push(h("section", {},
+        h("div", { class: "section-head" }, h("h2", {}, "Your classmates")),
+        h("div", { class: "panel tight" }, rows)));
+    }
+
+    out.push(h("section", {},
+      h("div", { class: "section-head" }, h("h2", {}, "Shared classes")),
+      shared.length
+        ? h("div", { class: "panel tight" }, shared.map((c) => h("a", { href: `#/wbt/class/${enc(c.code)}?quarter=${enc(quarter)}`, class: "shared-row" },
+          h("div", { class: "shared-top" },
+            h("b", {}, c.code),
+            h("span", { class: "shared-title" }, courseTitle(catalog, c.code)),
+            h("span", { class: "shared-count" }, plural(c.people.length, "brother"))),
+          h("span", { class: "shared-names" }, c.people.map(firstName).join(", ")))))
+        : h("p", { class: "muted small" }, "No two brothers share a class yet.")));
+
+    // All classes, grouped by department and collapsed so the page stays short.
+    const byDept = new Map();
+    for (const c of classes) {
+      const prefix = coursePrefix(c.code);
+      byDept.set(prefix, [...(byDept.get(prefix) || []), c]);
+    }
+    const depts = [...byDept.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    out.push(h("section", {},
+      h("div", { class: "section-head" }, h("h2", {}, "All classes"), h("span", { class: "row-sub" }, `${classesWord(classes.length)} · ${depts.length} departments`)),
+      h("div", { class: "dept-groups" }, depts.map(([prefix, list]) => h("details", { class: "dept-group" },
+        h("summary", {},
+          h("span", { class: "dept-code" }, prefix),
+          h("span", { class: "dept-name" }, catalog.departments[prefix] || ""),
+          h("span", { class: "dept-count" }, String(list.length))),
+        list.sort((a, b) => a.code.localeCompare(b.code)).map((c) => compactClassRow(c, catalog, quarter)))))));
+    return out;
+  }
+
   function update() {
     const text = search.value.trim();
+    if (!text) return browse.replaceChildren(...sections());
     const key = compact(text);
     const words = text.toLowerCase();
-    const people = text ? schedules.filter((s) => s.full_name.toLowerCase().includes(words)) : [];
-    const shown = text
-      ? classes.filter((c) => (key && compact(c.code).includes(key)) || courseTitle(catalog, c.code).toLowerCase().includes(words))
-      : classes;
-    list.replaceChildren(...[
+    const people = schedules.filter((s) => s.full_name.toLowerCase().includes(words));
+    const shown = classes.filter((c) => (key && compact(c.code).includes(key)) || courseTitle(catalog, c.code).toLowerCase().includes(words));
+    browse.replaceChildren(...[
       people.length > 0 && h("p", { class: "list-label" }, "Brothers"),
-      ...people.map(brotherRow),
-      shown.length > 0 && h("p", { class: "list-label" }, text ? "Classes" : "Most-taken classes"),
-      ...shown.map((c) => wbtClassRow(c, catalog, quarter)),
-      people.length === 0 && shown.length === 0 && (schedules.length ? h("p", { class: "muted pad" }, "No matches.") : emptyWbt(quarter)),
+      people.length > 0 && h("div", { class: "list" }, people.map(brotherRow)),
+      shown.length > 0 && h("p", { class: "list-label" }, "Classes"),
+      shown.length > 0 && h("div", { class: "panel tight" }, shown.map((c) => compactClassRow(c, catalog, quarter))),
+      people.length === 0 && shown.length === 0 && h("p", { class: "muted pad" }, "No matches."),
     ].filter(Boolean));
   }
   search.addEventListener("input", update);
@@ -526,10 +565,21 @@ async function renderWbtHome(view, requested) {
       h("div", { class: "hero-search" }, icon("search"), h("label", { for: "wbt-search", class: "sr-only" }, "Search"), search)),
     h("main", { class: "wrap page" },
       quarterPills(quarter, quarters, "#/wbt"),
-      schedules.length > 0 && h("p", { class: "summary" }, `${plural(schedules.length, "brother")} · ${classesWord(classes.length)}`),
-      h("a", { href: `#/wbt/add?quarter=${enc(quarter)}`, class: "btn gold block" }, icon("plus"), "Add or edit my classes"),
-      list));
+      schedules.length > 0 && h("div", { class: "stat-row" },
+        stat(String(schedules.length), schedules.length === 1 ? "Brother" : "Brothers"),
+        stat(String(classes.length), classes.length === 1 ? "Class" : "Classes"),
+        stat(String(shared.length), "Shared")),
+      h("a", { href: `#/wbt/add?quarter=${enc(quarter)}`, class: "btn gold block" }, icon("plus"), mine ? "Edit my classes" : "Add my classes"),
+      browse));
   update();
+}
+
+// One-line class row: code, title, and how many brothers.
+function compactClassRow(c, catalog, quarter) {
+  return h("a", { href: `#/wbt/class/${enc(c.code)}?quarter=${enc(quarter)}`, class: "compact-row" },
+    h("b", {}, c.code),
+    h("span", { class: "compact-title" }, courseTitle(catalog, c.code)),
+    h("span", { class: `compact-count${c.people.length > 1 ? " many" : ""}` }, icon("people"), String(c.people.length)));
 }
 
 async function renderWbtClass(view, code, requested) {
